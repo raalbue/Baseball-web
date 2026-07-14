@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Items in "{{ todo_list.title }}"</h2>
+    <a class="btn btn-secondary"
+       href="{% url 'manage:user-lists' todo_list.owner_id %}">Back to lists</a>
+</div>
+{% if items %}
+<ul class="list-group">
+    {% for item in items %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+        <span>{{ item.title }}</span>
+        <div class="d-flex gap-2 align-items-center">
+            <span class="text-muted small">Due {{ item.due_date|date:"l, F j" }}</span>
+            <a class="btn btn-sm btn-outline-secondary"
+               href="{% url 'manage:user-item-edit' todo_list.id item.id %}">Edit</a>
+            <a class="btn btn-sm btn-outline-danger"
+               href="{% url 'manage:user-item-delete' todo_list.id item.id %}">Delete</a>
+        </div>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="text-muted">This list has no items.</p>
+{% endif %}
+{% endblock %}

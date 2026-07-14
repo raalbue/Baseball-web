@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Users</h2>
+    <a class="btn btn-primary" href="{% url 'manage:user-add' %}">Add user</a>
+</div>
+<table class="table table-hover">
+    <thead>
+        <tr>
+            <th>Username</th><th>Email</th><th>Display name</th>
+            <th>Staff</th><th>Active</th><th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for u in users %}
+        <tr>
+            <td>{{ u.username }}</td>
+            <td>{{ u.email|default:"—" }}</td>
+            <td>{{ u.profile.display_name|default:"—" }}</td>
+            <td>{% if u.is_staff %}Yes{% else %}No{% endif %}</td>
+            <td>{% if u.is_active %}Yes{% else %}No{% endif %}</td>
+            <td>
+                <a class="btn btn-sm btn-outline-secondary"
+                   href="{% url 'manage:user-edit' u.pk %}">Edit</a>
+                <a class="btn btn-sm btn-outline-primary"
+                   href="{% url 'manage:user-lists' u.pk %}">Lists</a>
+                {% if u.pk != request.user.pk %}
+                <a class="btn btn-sm btn-outline-danger"
+                   href="{% url 'manage:user-delete' u.pk %}">Delete</a>
+                {% endif %}
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

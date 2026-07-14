@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>{{ todo_list.title }}</h2>
+    <div class="d-flex gap-2">
+        <a class="btn btn-primary btn-sm" href="{% url 'item-add' todo_list.id %}">Add a new item</a>
+        <a class="btn btn-outline-danger btn-sm" href="{% url 'list-delete' todo_list.id %}">Delete this list</a>
+    </div>
+</div>
+{% if object_list %}
+<ul class="list-group">
+    {% for todo in object_list %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+        <a href="{% url 'item-update' todo_list.id todo.id %}" class="text-decoration-none">{{ todo.title }}</a>
+        <span class="text-muted small">Due {{ todo.due_date|date:"l, F j" }}</span>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="text-muted">There are no to-do items in this list.</p>
+{% endif %}
+<div class="mt-3">
+    <a class="btn btn-outline-secondary btn-sm" href="{% url 'index' %}">Back to lists</a>
+</div>
+{% endblock %}

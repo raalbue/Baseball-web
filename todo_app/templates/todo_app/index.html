@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>My Lists</h2>
+    <a class="btn btn-primary" href="{% url 'list-add' %}">Add a new list</a>
+</div>
+{% if object_list %}
+<ul class="list-group">
+    {% for todolist in object_list %}
+    <li class="list-group-item">
+        <a href="{% url 'list' todolist.id %}" class="text-decoration-none">{{ todolist.title }}</a>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="text-muted">You have no lists. <a href="{% url 'list-add' %}">Create one</a>.</p>
+{% endif %}
+{% endblock %}

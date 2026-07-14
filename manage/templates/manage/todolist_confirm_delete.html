@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Delete list</h2>
+<p>Delete list <strong>"{{ todo_list.title }}"</strong> and all its items?
+   This cannot be undone.</p>
+<form method="post">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">Delete</button>
+    <a class="btn btn-secondary"
+       href="{% url 'manage:user-lists' todo_list.owner_id %}">Cancel</a>
+</form>
+{% endblock %}

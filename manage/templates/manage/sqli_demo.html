@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+<h2>SQL Injection Demo — {{ mode|upper }}</h2>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card border-danger">
+            <div class="card-header bg-danger text-white">Vulnerable endpoint</div>
+            <div class="card-body">
+                <form method="get" action="{% url 'manage:sqli-vulnerable' %}">
+                    <div class="input-group">
+                        <input type="text" name="username" class="form-control"
+                               value="{{ username }}" placeholder="username">
+                        <button class="btn btn-danger">Search</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card border-success">
+            <div class="card-header bg-success text-white">Safe endpoint</div>
+            <div class="card-body">
+                <form method="get" action="{% url 'manage:sqli-safe' %}">
+                    <div class="input-group">
+                        <input type="text" name="username" class="form-control"
+                               value="{{ username }}" placeholder="username">
+                        <button class="btn btn-success">Search</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h5>Query sent to the database</h5>
+<pre class="bg-dark text-warning p-3 rounded">{{ query }}</pre>
+
+{% if error %}
+<div class="alert alert-danger"><strong>DB error:</strong> {{ error }}</div>
+{% endif %}
+
+{% if rows %}
+<table class="table table-bordered">
+    <thead><tr><th>id</th><th>username</th><th>email</th><th>is_staff</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+        <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% elif not error %}
+<p class="text-muted">No rows returned.</p>
+{% endif %}
+
+<hr>
+<h5>Payloads to try on the vulnerable side</h5>
+<table class="table table-sm">
+    <thead><tr><th>Input</th><th>What it does</th></tr></thead>
+    <tbody>
+        <tr>
+            <td><code>raalbue</code></td>
+            <td>Normal lookup — returns one row.</td>
+        </tr>
+        <tr>
+            <td><code>' OR '1'='1</code></td>
+            <td>Always-true condition — returns <em>every</em> user in the table.</td>
+        </tr>
+        <tr>
+            <td><code>' OR '1'='1'--</code></td>
+            <td>Same as above; <code>--</code> comments out anything after the injection point.</td>
+        </tr>
+        <tr>
+            <td><code>' UNION SELECT id, password, email, is_staff FROM auth_user--</code></td>
+            <td>Appends a second SELECT — leaks hashed passwords into the result set.</td>
+        </tr>
+        <tr>
+            <td><code>' AND '1'='2</code></td>
+            <td>Always-false condition — returns nothing, useful for blind probing.</td>
+        </tr>
+    </tbody>
+</table>
+<p class="text-muted small">
+    Try the same payloads on the <strong>safe</strong> side — they are treated as a literal
+    string value, so no rows match and the query structure is never altered.
+</p>
+
+<hr>
+<figure class="text-center mt-4">
+    <img src="{% static 'images/exploits_of_a_mom.png' %}"
+         alt="xkcd 327: Exploits of a Mom — Little Bobby Tables"
+         class="img-fluid rounded">
+    <figcaption class="text-muted small mt-2">
+        xkcd 327 — <em>Exploits of a Mom</em>
+    </figcaption>
+</figure>
+{% endblock %}

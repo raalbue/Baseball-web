@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Set Rosters</h2>
+<p class="text-muted">
+  {{ setup.away_name }} (away, CPU) vs {{ setup.home_name }} (home, you).
+  The away roster is pre-filled — edit it if you like. Drag rows to set batting order.
+</p>
+
+<form method="post" class="mt-3">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <div class="row">
+
+      <!-- Away column -->
+      <div class="col-md-6">
+        <h4>{{ setup.away_name }} <small class="text-muted fs-6">Away · CPU</small></h4>
+
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">
+            Pitcher <span class="text-muted fw-normal">(does not bat)</span>
+          </label>
+          {{ form.away_pitcher_field }}
+          {% if form.away_pitcher_field.errors %}
+          <div class="text-danger small">{{ form.away_pitcher_field.errors }}</div>
+          {% endif %}
+        </div>
+
+        {{ form.away_order }}
+        <label class="form-label small fw-semibold">Batting Order <span class="text-muted fw-normal">(drag to reorder)</span></label>
+        <ol class="list-group list-group-numbered" id="away-batting">
+          {% for code, field in form.away_batting_fields %}
+          <li class="list-group-item d-flex align-items-center gap-2" data-pos="{{ code }}">
+            <span class="drag-handle text-muted" style="cursor:grab;font-size:1.1rem;user-select:none">⠿</span>
+            <div class="flex-grow-1">
+              <div class="small text-muted mb-1">{{ field.label }}</div>
+              {{ field }}
+              {% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ol>
+      </div>
+
+      <!-- Home column -->
+      <div class="col-md-6">
+        <h4>{{ setup.home_name }} <small class="text-muted fs-6">Home · You</small></h4>
+
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">
+            Pitcher <span class="text-muted fw-normal">(does not bat)</span>
+          </label>
+          {{ form.home_pitcher_field }}
+          {% if form.home_pitcher_field.errors %}
+          <div class="text-danger small">{{ form.home_pitcher_field.errors }}</div>
+          {% endif %}
+        </div>
+
+        {{ form.home_order }}
+        <label class="form-label small fw-semibold">Batting Order <span class="text-muted fw-normal">(drag to reorder)</span></label>
+        <ol class="list-group list-group-numbered" id="home-batting">
+          {% for code, field in form.home_batting_fields %}
+          <li class="list-group-item d-flex align-items-center gap-2" data-pos="{{ code }}">
+            <span class="drag-handle text-muted" style="cursor:grab;font-size:1.1rem;user-select:none">⠿</span>
+            <div class="flex-grow-1">
+              <div class="small text-muted mb-1">{{ field.label }}</div>
+              {{ field }}
+              {% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}
+            </div>
+          </li>
+          {% endfor %}
+        </ol>
+      </div>
+
+    </div>
+
+    <div class="mt-4">
+      <button type="submit" class="btn btn-success">Play Ball!</button>
+      <a href="{% url 'baseball-new' %}" class="btn btn-link">Back</a>
+    </div>
+</form>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+function wireSortable(listId, orderInputId) {
+  const list  = document.getElementById(listId);
+  const order = document.getElementById(orderInputId);
+  function sync() {
+    order.value = Array.from(list.children)
+      .map(li => li.dataset.pos).join(",");
+  }
+  new Sortable(list, { handle: ".drag-handle", animation: 150, onEnd: sync });
+  sync();
+}
+wireSortable("away-batting", "id_away_order");
+wireSortable("home-batting", "id_home_order");
+</script>
+{% endblock %}

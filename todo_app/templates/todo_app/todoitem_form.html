@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block content %}
+<h2>{{ title }}</h2>
+<div class="row">
+    <div class="col-md-6">
+        <form method="post">
+            {% csrf_token %}
+            {{ form|crispy }}
+            <button type="submit" class="btn btn-primary">Save</button>
+            <a class="btn btn-secondary" href="{% url 'list' todo_list.id %}">Cancel</a>
+            {% if object %}
+            <a class="btn btn-danger" href="{% url 'item-delete' todo_list.id object.id %}">Delete this item</a>
+            {% endif %}
+        </form>
+    </div>
+</div>
+{% endblock %}

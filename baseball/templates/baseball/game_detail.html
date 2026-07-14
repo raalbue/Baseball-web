@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+
+<!-- Hidden CSRF input for JS fetch POSTs -->
+<form id="csrf-form" style="display:none">{% csrf_token %}</form>
+
+<!-- JS config injected server-side -->
+<script>
+const GAME_MODE   = "{{ game.mode }}";
+const GAME_STATUS = "{{ game.status }}";
+const ROLL_URL    = "{% url 'baseball-roll' game.pk %}";
+const SIM_URL     = "{% url 'baseball-simulate' game.pk %}";
+const SOUND_HR    = "{% static 'baseball/sounds/5.wav' %}";
+const SOUND_WIN   = "{% static 'baseball/sounds/10.wav' %}";
+const SOUND_PLAY  = "{% static 'baseball/sounds/1.wav' %}";
+const TOTAL_INN   = {{ game.total_innings }};
+</script>
+
+<div class="row g-4">
+
+  <!-- Left: scoreboard + controls -->
+  <div class="col-md-5">
+
+    <!-- Scoreboard card -->
+    <div class="card mb-3">
+      <div class="card-header fw-bold" id="sb-inning-label">
+        <span id="sb-half">{% if game.state.half == "top" %}Top{% else %}Bottom{% endif %}</span>
+        of Inning <span id="sb-inning">{{ game.state.inning }}</span>/{{ game.total_innings }}
+      </div>
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <span>
+            {{ game.away_name }}
+            <small id="sb-away-bat" class="text-success fw-semibold">
+              {% if game.state.half == "top" %}← batting{% endif %}
+            </small>
+          </span>
+          <strong id="sb-away-score">{{ game.state.away_score }}</strong>
+        </li>
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <span>
+            {{ game.home_name }}
+            <small id="sb-home-bat" class="text-success fw-semibold">
+              {% if game.state.half == "bottom" %}← batting{% endif %}
+            </small>
+          </span>
+          <strong id="sb-home-score">{{ game.state.home_score }}</strong>
+        </li>
+      </ul>
+      <div class="card-body">
+        <div class="mb-2">
+          Outs: <span id="sb-outs">{{ game.state.outs }}</span>
+        </div>
+        <!-- Diamond — data attrs used by JS for initial render + cpu_auto init -->
+        <div id="diamond"
+             data-half="{{ game.state.half }}"
+             data-bases="{{ game.state.bases|join:',' }}"
+             class="my-2"
+             style="font-family:monospace;line-height:1.6">
+        </div>
+        <p class="mt-2 mb-0">
+          Batting: <strong><span id="sb-batter">{{ current_batter }}</span></strong>
+          <span id="sb-batter-line" class="text-muted">{% if current_batter_line %}({{ current_batter_line }}){% endif %}</span>
+          (<span id="sb-team">{{ batting_team }}</span>)
+        </p>
+      </div>
+    </div>
+
+    <!-- Dice result (hidden until first roll) -->
+    <div id="dice-display" class="card mb-3 d-none">
+      <div class="card-body text-center">
+        <h3 id="dice-roll" class="mb-1"></h3>
+        <p id="dice-outcome" class="fw-bold fs-5 mb-0"></p>
+      </div>
+    </div>
+
+    <!-- Action area -->
+    <div id="btn-area">
+      {% if game.status == "finished" %}
+      <div class="alert alert-success fw-bold fs-5 mb-0">
+        {% if winner %}{{ winner }} win!{% else %}It's a tie!{% endif %}
+        <br>
+        <small class="fw-normal">
+          {{ game.away_name }} {{ game.state.away_score }} –
+          {{ game.state.home_score }} {{ game.home_name }}
+        </small>
+        <br>
+        <a href="{% url 'baseball-list' %}" class="btn btn-outline-success btn-sm mt-2">
+          Back to games
+        </a>
+      </div>
+      {% elif game.mode == "auto_play" %}
+      <button id="btn-play" class="btn btn-success btn-lg w-100">
+        ▶ Play Ball!
+      </button>
+      {% else %}
+      <button id="btn-roll" class="btn btn-primary btn-lg w-100">
+        🎲 Roll Dice
+      </button>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- Right: play-by-play log -->
+  <div class="col-md-7">
+    <div class="card h-100">
+      <div class="card-header fw-bold">Play-by-Play</div>
+      <div id="play-log"
+           class="card-body"
+           style="max-height:70vh;overflow-y:auto;font-size:.875rem">
+        {% for play in game.play_log %}
+        <p class="mb-1">
+          [{% if play.play_half == "top" %}TOP{% else %}BOT{% endif %} {{ play.play_inning }}]
+          🎲 [{{ play.d1 }}][{{ play.d2 }}] &mdash; {{ play.message }}
+        </p>
+        {% empty %}
+        <p class="text-muted" id="log-empty">No plays yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{% if game.away_roster %}
+<div class="row g-4 mt-1">
+  {% for side_roster, side_name in lineups %}
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header fw-semibold">{{ side_name }} Batting Order</div>
+      <ol class="list-group list-group-flush list-group-numbered">
+        {% for entry in side_roster %}
+        {% if entry.position != "P" %}
+        <li class="list-group-item d-flex justify-content-between">
+          <span>{{ entry.name }}</span>
+          <span>
+            <small id="stat-{{ entry.player_id }}" class="text-primary fw-semibold me-2">{{ entry.line }}</small>
+            <small class="text-muted">{{ entry.position }}</small>
+          </span>
+        </li>
+        {% endif %}
+        {% endfor %}
+      </ol>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<script src="{% static 'baseball/js/game.js' %}"></script>
+{% endblock %}
