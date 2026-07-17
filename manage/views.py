@@ -72,7 +72,11 @@ class UserEditView(StaffRequiredMixin, View):
         user_form = AdminUserEditForm(request.POST, instance=target)
         profile_form = AdminProfileForm(request.POST, instance=target.profile)
         if user_form.is_valid() and profile_form.is_valid():
-            user_form.save()
+            user = user_form.save(commit=False)
+            new_password = user_form.cleaned_data.get("new_password")
+            if new_password:
+                user.set_password(new_password)
+            user.save()
             profile_form.save()
             messages.success(request, f"User '{target.username}' updated.")
             return redirect("manage:user-list")

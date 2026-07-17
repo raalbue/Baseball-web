@@ -8,3 +8,11 @@ from .models import Profile
 def create_profile(sender, instance, created, **kwargs):
     if created:
         Profile.objects.create(user=instance)
+
+
+@receiver(post_save, sender=Profile)
+def sync_role_to_staff(sender, instance, **kwargs):
+    desired = instance.role == Profile.ROLE_ADMIN
+    if instance.user.is_staff != desired:
+        instance.user.is_staff = desired
+        instance.user.save(update_fields=["is_staff"])

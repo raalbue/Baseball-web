@@ -21,21 +21,25 @@
                     <a class="nav-link" href="{% url 'index' %}">My Lists</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{% url 'profile' %}">Profile</a>
-                </li>
-                <li class="nav-item">
                     <a class="nav-link" href="{% url 'baseball-list' %}">Baseball</a>
                 </li>
-                {% if user.is_staff %}
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'manage:user-list' %}">Admin</a>
-                </li>
-                {% endif %}
-                <li class="nav-item">
-                    <form method="post" action="{% url 'logout' %}" class="m-0">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-link nav-link p-0">Logout</button>
-                    </form>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="userMenu" role="button"
+                       data-bs-toggle="dropdown" aria-expanded="false">
+                        Hello {{ user.username }}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenu">
+                        <li><a class="dropdown-item" href="{% url 'profile' %}">Profile</a></li>
+                        {% if user.is_staff %}
+                        <li><a class="dropdown-item" href="{% url 'manage:user-list' %}">Admin Dashboard</a></li>
+                        {% endif %}
+                        <li>
+                            <form method="post" action="{% url 'logout' %}" class="m-0">
+                                {% csrf_token %}
+                                <button type="submit" class="dropdown-item text-danger">Logout</button>
+                            </form>
+                        </li>
+                    </ul>
                 </li>
                 {% else %}
                 <li class="nav-item">
