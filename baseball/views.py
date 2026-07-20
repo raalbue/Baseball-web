@@ -11,6 +11,7 @@ from django.views.generic import ListView, DetailView
 from .forms import Page1Form, SideRosterForm, POSITIONS, BATTING_POSITIONS
 from .models import Game, Player, Team, GameStat, position_pools, main_position
 from .engine import GameState, resolve_dice_roll, apply_in_play
+from .stadiums import stadium_context
 
 _HIT_STAT   = {"single": "singles", "double": "doubles",
                "triple": "triples", "home_run": "home_runs"}
@@ -450,6 +451,7 @@ class GameDetailView(LoginRequiredMixin, DetailView):
             away, home = gs.away_score, gs.home_score
             ctx["winner"] = gs.away_name if away > home else (
                 gs.home_name if home > away else None)
+        ctx["stadium"] = stadium_context(self.object.home_team)
         if self.object.mode == Game.MULTIPLAYER:
             if self.request.user == self.object.owner:
                 ctx["my_side"] = self.object.owner_side

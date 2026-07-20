@@ -38,16 +38,9 @@ function updateScoreboard(state) {
 }
 
 function updateDiamond(bases) {
-    const on = '🟡', off = '⬜';
-    const b1 = bases[0], b2 = bases[1], b3 = bases[2];
-    document.getElementById('diamond').innerHTML =
-        `<pre style="line-height:1.4;margin:0">` +
-        `         ${b2 ? on : off}\n` +
-        `        /   \\\n` +
-        `    ${b3 ? on : off}       ${b1 ? on : off}\n` +
-        `        \\   /\n` +
-        `         (H)\n` +
-        `</pre>`;
+    document.getElementById('base-marker-1').classList.toggle('occupied', !!bases[0]);
+    document.getElementById('base-marker-2').classList.toggle('occupied', !!bases[1]);
+    document.getElementById('base-marker-3').classList.toggle('occupied', !!bases[2]);
 }
 
 function showDice(d1, d2, outcome) {
