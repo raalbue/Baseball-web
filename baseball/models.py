@@ -233,22 +233,32 @@ class Lineup(models.Model):
 # ---------------------------------------------------------------------------
 
 class Game(models.Model):
-    CPU_AUTO  = "cpu_auto"
-    CLICK_ALL = "click_all"
-    AUTO_PLAY = "auto_play"
+    CPU_AUTO    = "cpu_auto"
+    CLICK_ALL   = "click_all"
+    AUTO_PLAY   = "auto_play"
+    MULTIPLAYER = "multiplayer"
     MODE_CHOICES = [
-        (CPU_AUTO,  "CPU auto, you click"),
-        (CLICK_ALL, "Click every at-bat"),
-        (AUTO_PLAY, "Auto-play whole game"),
+        (CPU_AUTO,    "CPU auto, you click"),
+        (CLICK_ALL,   "Click every at-bat"),
+        (AUTO_PLAY,   "Auto-play whole game"),
+        (MULTIPLAYER, "Multiplayer (invite a player)"),
     ]
 
     ACTIVE   = "active"
+    WAITING  = "waiting"
     FINISHED = "finished"
-    STATUS_CHOICES = [(ACTIVE, "Active"), (FINISHED, "Finished")]
+    STATUS_CHOICES = [
+        (ACTIVE, "Active"), (WAITING, "Waiting for player"), (FINISHED, "Finished"),
+    ]
+
+    CPU_SIDE_CHOICES = [("away", "Away"), ("home", "Home")]
 
     owner         = models.ForeignKey(settings.AUTH_USER_MODEL,
                                       on_delete=models.CASCADE,
                                       related_name="baseball_games")
+    player2       = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                      on_delete=models.CASCADE,
+                                      related_name="baseball_games_as_player2")
     away_name     = models.CharField(max_length=50)
     home_name     = models.CharField(max_length=50)
     away_team     = models.ForeignKey(
@@ -263,6 +273,10 @@ class Game(models.Model):
     home_roster   = models.JSONField(default=list)
     total_innings = models.PositiveSmallIntegerField(default=3)
     mode          = models.CharField(max_length=20, choices=MODE_CHOICES)
+    cpu_side      = models.CharField(max_length=4, choices=CPU_SIDE_CHOICES,
+                                     null=True, blank=True)
+    owner_side    = models.CharField(max_length=4, choices=CPU_SIDE_CHOICES,
+                                     null=True, blank=True)
     state         = models.JSONField()
     play_log      = models.JSONField(default=list)
     status        = models.CharField(max_length=20, choices=STATUS_CHOICES,

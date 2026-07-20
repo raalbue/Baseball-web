@@ -21,22 +21,38 @@
     <tbody>
     {% for g in object_list %}
     <tr>
-        <td>{{ g.away_name }}</td>
-        <td>{{ g.home_name }}</td>
+        <td>{{ g.away_name|default:"?" }} <small class="text-muted">({{ g.away_username }})</small></td>
+        <td>{{ g.home_name|default:"?" }} <small class="text-muted">({{ g.home_username }})</small></td>
         <td>{{ g.total_innings }}</td>
         <td><small>{{ g.get_mode_display }}</small></td>
         <td>
             {% if g.status == "finished" %}
             <span class="badge bg-secondary">Finished</span>
+            {% elif g.status == "waiting" %}
+            <span class="badge bg-warning text-dark">Waiting</span>
             {% else %}
             <span class="badge bg-success">Active</span>
             {% endif %}
         </td>
-        <td>{{ g.state.away_score }} – {{ g.state.home_score }}</td>
-        <td>
+        <td>{% if g.status != "waiting" %}{{ g.state.away_score }} – {{ g.state.home_score }}{% else %}—{% endif %}</td>
+        <td class="d-flex align-items-center gap-1">
+            {% if g.status == "waiting" %}
+                {% if g.player2 == user %}
+                <a href="{% url 'baseball-join' g.pk %}" class="btn btn-sm btn-success">Join</a>
+                {% else %}
+                <a href="{% url 'baseball-waiting' g.pk %}" class="btn btn-sm btn-outline-secondary">Waiting for you to join</a>
+                {% endif %}
+                <form method="post" action="{% url 'baseball-cancel' g.pk %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                        {% if g.owner == user %}Cancel{% else %}Decline{% endif %}
+                    </button>
+                </form>
+            {% else %}
             <a href="{% url 'baseball-detail' g.pk %}" class="btn btn-sm btn-outline-primary">
                 {% if g.status == "finished" %}View{% else %}Resume{% endif %}
             </a>
+            {% endif %}
         </td>
     </tr>
     {% endfor %}

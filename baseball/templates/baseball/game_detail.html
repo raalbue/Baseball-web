@@ -9,8 +9,12 @@
 <script>
 const GAME_MODE   = "{{ game.mode }}";
 const GAME_STATUS = "{{ game.status }}";
+const CPU_SIDE    = "{{ game.cpu_side|default:'' }}";
+const MY_SIDE        = "{{ my_side|default:'' }}";
+const OPPONENT_NAME  = "{{ opponent_username|default:'opponent' }}";
 const ROLL_URL    = "{% url 'baseball-roll' game.pk %}";
 const SIM_URL     = "{% url 'baseball-simulate' game.pk %}";
+const REPLAY_URL  = "{% url 'baseball-replay' game.pk %}";
 const SOUND_HR    = "{% static 'baseball/sounds/5.wav' %}";
 const SOUND_WIN   = "{% static 'baseball/sounds/10.wav' %}";
 const SOUND_PLAY  = "{% static 'baseball/sounds/1.wav' %}";
@@ -67,9 +71,10 @@ const TOTAL_INN   = {{ game.total_innings }};
       </div>
     </div>
 
-    <!-- Dice result (hidden until first roll) -->
-    <div id="dice-display" class="card mb-3 d-none">
-      <div class="card-body text-center">
+    <!-- Dice result (always reserved; empty until a roll fills it in) -->
+    <div id="dice-display" class="card mb-3">
+      <div class="card-body text-center d-flex flex-column justify-content-center"
+           style="min-height:110px">
         <h3 id="dice-roll" class="mb-1"></h3>
         <p id="dice-outcome" class="fw-bold fs-5 mb-0"></p>
       </div>
@@ -89,6 +94,17 @@ const TOTAL_INN   = {{ game.total_innings }};
         <a href="{% url 'baseball-list' %}" class="btn btn-outline-success btn-sm mt-2">
           Back to games
         </a>
+        {% if game.mode != "multiplayer" %}
+        <div class="mt-2 d-flex align-items-center gap-2">
+          <button type="button" id="btn-replay" class="btn btn-outline-primary btn-sm">
+            🔁 Replay
+          </button>
+          <label class="form-check-label small mb-0" for="chk-autoplay">
+            <input type="checkbox" id="chk-autoplay" class="form-check-input me-1">
+            Autoplay
+          </label>
+        </div>
+        {% endif %}
       </div>
       {% elif game.mode == "auto_play" %}
       <button id="btn-play" class="btn btn-success btn-lg w-100">
@@ -110,11 +126,14 @@ const TOTAL_INN   = {{ game.total_innings }};
       <div id="play-log"
            class="card-body"
            style="max-height:70vh;overflow-y:auto;font-size:.875rem">
-        {% for play in game.play_log %}
+        {% for play in play_log_reversed %}
         <p class="mb-1">
           [{% if play.play_half == "top" %}TOP{% else %}BOT{% endif %} {{ play.play_inning }}]
           🎲 [{{ play.d1 }}][{{ play.d2 }}] &mdash; {{ play.message }}
         </p>
+        {% if play.starts_extra %}
+        <p class="text-center fw-bold text-danger my-2">========= E X T R A &nbsp; I N N I N G S =========</p>
+        {% endif %}
         {% empty %}
         <p class="text-muted" id="log-empty">No plays yet.</p>
         {% endfor %}

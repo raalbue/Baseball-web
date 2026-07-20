@@ -1,4 +1,5 @@
 from django import forms
+from django.contrib.auth import get_user_model
 from .models import Game, Team, Player, position_pools
 
 POSITIONS = [
@@ -16,91 +17,42 @@ POSITIONS = [
 BATTING_POSITIONS = [code for code, _ in POSITIONS if code != "P"]
 
 
-class GameSetupForm(forms.ModelForm):
-    away_team = forms.ModelChoiceField(
-        queryset=Team.objects.all(),
-        label="Away Team",
-        empty_label="— select away team —",
-        widget=forms.Select(attrs={"class": "form-select"}),
-    )
-    home_team = forms.ModelChoiceField(
-        queryset=Team.objects.all(),
-        label="Home Team",
-        empty_label="— select home team —",
-        widget=forms.Select(attrs={"class": "form-select"}),
-    )
+class SideRosterForm(forms.Form):
+    """One side's team pick + 10-slot roster (unprefixed position field names)."""
 
-    class Meta:
-        model  = Game
-        fields = ["away_team", "home_team", "total_innings", "mode"]
-        widgets = {
-            "total_innings": forms.NumberInput(attrs={"min": 1, "max": 9, "class": "form-control"}),
-            "mode":          forms.RadioSelect,
-        }
-
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, team=None, team_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["total_innings"].initial = 3
+        self.fields["team"] = forms.ModelChoiceField(
+            queryset=team_queryset if team_queryset is not None else Team.objects.all(),
+            label="Team",
+            empty_label="— select team —",
+            widget=forms.Select(attrs={"class": "form-select", "id": "id_team"}),
+        )
+        pools = position_pools(team) if team else {}
+        for code, label in POSITIONS:
+            ids = pools.get(code, [])
+            qs = Player.objects.filter(player_id__in=ids) if team else Player.objects.none()
+            self.fields[code] = forms.ModelChoiceField(
+                queryset=qs,
+                label=label,
+                empty_label=f"— select {label.lower()} —",
+                widget=forms.Select(attrs={"class": "form-select"}),
+            )
+        self.fields["order"] = forms.CharField(
+            required=False,
+            initial=",".join(BATTING_POSITIONS),
+            widget=forms.HiddenInput(),
+        )
+
+    def pitcher_field(self):
+        return self["P"]
+
+    def batting_fields(self):
+        return [(code, self[code]) for code in BATTING_POSITIONS]
 
     def clean(self):
         cleaned = super().clean()
-        away = cleaned.get("away_team")
-        home = cleaned.get("home_team")
-        if away and home and away == home:
-            raise forms.ValidationError("Away and home teams must be different.")
-        return cleaned
-
-
-class RosterForm(forms.Form):
-    """20 player dropdowns: away_<POS> and home_<POS> for each position."""
-
-    def __init__(self, *args, away_team=None, home_team=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._sides = {"away": away_team, "home": home_team}
-        for side, team in self._sides.items():
-            pools = position_pools(team) if team else {}
-            for code, label in POSITIONS:
-                ids = pools.get(code, [])
-                qs = (Player.objects.filter(player_id__in=ids)
-                      if team else Player.objects.none())
-                self.fields[f"{side}_{code}"] = forms.ModelChoiceField(
-                    queryset=qs,
-                    label=label,
-                    empty_label=f"— select {label.lower()} —",
-                    widget=forms.Select(attrs={"class": "form-select"}),
-                )
-        batting_codes = ",".join(BATTING_POSITIONS)
-        for side in ("away", "home"):
-            self.fields[f"{side}_order"] = forms.CharField(
-                required=False,
-                initial=batting_codes,
-                widget=forms.HiddenInput(),
-            )
-
-    def away_fields(self):
-        return [self[f"away_{code}"] for code, _ in POSITIONS]
-
-    def home_fields(self):
-        return [self[f"home_{code}"] for code, _ in POSITIONS]
-
-    def away_pitcher_field(self):
-        return self["away_P"]
-
-    def home_pitcher_field(self):
-        return self["home_P"]
-
-    def _batting_fields(self, side):
-        return [(code, self[f"{side}_{code}"]) for code in BATTING_POSITIONS]
-
-    def away_batting_fields(self):
-        return self._batting_fields("away")
-
-    def home_batting_fields(self):
-        return self._batting_fields("home")
-
-    def _clean_side(self, side):
-        chosen = {code: self.cleaned_data.get(f"{side}_{code}")
-                  for code, _ in POSITIONS}
+        chosen = {code: cleaned.get(code) for code, _ in POSITIONS}
         ids = [pl.player_id for pl in chosen.values() if pl is not None]
         p_pick, dh_pick = chosen.get("P"), chosen.get("DH")
         if (p_pick is not None and dh_pick is not None
@@ -108,24 +60,69 @@ class RosterForm(forms.Form):
             ids.remove(dh_pick.player_id)
         if len(ids) != len(set(ids)):
             raise forms.ValidationError(
-                f"Each {side} player can only fill one position "
-                f"(except a pitcher may also be the DH)."
+                "Each player can only fill one position "
+                "(except a pitcher may also be the DH)."
             )
-
-    def clean(self):
-        cleaned = super().clean()
-        for side in ("away", "home"):
-            self._clean_side(side)
         return cleaned
 
-    def roster_for(self, side):
+    def roster_for(self):
         """10-slot roster: pitcher first, then 9 batting slots in chosen order."""
-        raw = (self.cleaned_data.get(f"{side}_order") or "").split(",")
+        raw = (self.cleaned_data.get("order") or "").split(",")
         order = [c for c in raw if c]
         if sorted(order) != sorted(BATTING_POSITIONS):
             order = list(BATTING_POSITIONS)
         out = []
         for code in ["P"] + order:
-            p = self.cleaned_data[f"{side}_{code}"]
+            p = self.cleaned_data[code]
             out.append({"position": code, "player_id": p.player_id, "name": str(p)})
         return out
+
+
+class Page1Form(SideRosterForm):
+    """Page 1: side + team + roster + mode + innings (+ opponent team if cpu_auto)."""
+
+    SIDE_CHOICES = [("away", "Away"), ("home", "Home")]
+    INNINGS_CHOICES = [(3, "3"), (6, "6"), (9, "9")]
+
+    def __init__(self, *args, request_user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["side"] = forms.ChoiceField(
+            choices=self.SIDE_CHOICES, widget=forms.RadioSelect, initial="away",
+        )
+        self.fields["mode"] = forms.ChoiceField(
+            choices=Game.MODE_CHOICES, widget=forms.RadioSelect,
+            initial=Game.CPU_AUTO,
+        )
+        self.fields["total_innings"] = forms.TypedChoiceField(
+            choices=self.INNINGS_CHOICES, coerce=int, initial=3,
+            widget=forms.RadioSelect,
+        )
+        self.fields["opponent_team"] = forms.ModelChoiceField(
+            queryset=Team.objects.all(), required=False,
+            label="Opponent Team (CPU)",
+            empty_label="— select opponent team —",
+            widget=forms.Select(attrs={"class": "form-select"}),
+        )
+        User = get_user_model()
+        opp_qs = (User.objects.exclude(pk=request_user.pk)
+                  if request_user else User.objects.all())
+        self.fields["opponent_user"] = forms.ModelChoiceField(
+            queryset=opp_qs, required=False,
+            label="Opponent Player",
+            empty_label="— select opponent —",
+            widget=forms.Select(attrs={"class": "form-select"}),
+        )
+
+    def clean(self):
+        cleaned = super().clean()
+        team = cleaned.get("team")
+        opp  = cleaned.get("opponent_team")
+        mode = cleaned.get("mode")
+        if mode == Game.CPU_AUTO:
+            if not opp:
+                self.add_error("opponent_team", "Pick the CPU's team.")
+            elif team and team.team_id == opp.team_id:
+                self.add_error("opponent_team", "Opponent team must differ from your team.")
+        if mode == Game.MULTIPLAYER and not cleaned.get("opponent_user"):
+            self.add_error("opponent_user", "Pick an opponent to invite.")
+        return cleaned

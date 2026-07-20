@@ -1,53 +1,120 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>New Game</h2>
-<form method="post" class="mt-3" style="max-width:500px">
+<h2>New Game — Player 1</h2>
+<form method="post" class="mt-3" id="side-form">
     {% csrf_token %}
+    <input type="hidden" name="action" id="id_action" value="next">
 
     {% if form.non_field_errors %}
     <div class="alert alert-danger">{{ form.non_field_errors }}</div>
     {% endif %}
 
     <div class="mb-3">
-        <label class="form-label fw-semibold">Away Team</label>
-        {{ form.away_team }}
-        {% if form.away_team.errors %}
-        <div class="text-danger small">{{ form.away_team.errors }}</div>
-        {% endif %}
+        <label class="form-label fw-semibold d-block">You are</label>
+        {% for radio in form.side %}
+        <div class="form-check form-check-inline">
+            {{ radio.tag }}
+            <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
+        </div>
+        {% endfor %}
     </div>
 
-    <div class="mb-3">
-        <label class="form-label fw-semibold">Home Team</label>
-        {{ form.home_team }}
-        {% if form.home_team.errors %}
-        <div class="text-danger small">{{ form.home_team.errors }}</div>
-        {% endif %}
+    <div class="mb-3" style="max-width:400px">
+        <label class="form-label fw-semibold">Your Team</label>
+        {{ form.team }}
+        {% if form.team.errors %}<div class="text-danger small">{{ form.team.errors }}</div>{% endif %}
     </div>
 
-    <div class="mb-3">
+    <div class="mb-3" style="max-width:400px">
         <label class="form-label fw-semibold">Innings</label>
-        {{ form.total_innings }}
-        {% if form.total_innings.errors %}
-        <div class="text-danger small">{{ form.total_innings.errors }}</div>
-        {% endif %}
+        {% for radio in form.total_innings %}
+        <div class="form-check form-check-inline">
+            {{ radio.tag }}
+            <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
+        </div>
+        {% endfor %}
     </div>
 
-    <div class="mb-4">
+    <div class="mb-3">
         <label class="form-label fw-semibold d-block">Mode</label>
         {% for radio in form.mode %}
         <div class="form-check">
             {{ radio.tag }}
-            <label class="form-check-label" for="{{ radio.id_for_label }}">
-                {{ radio.choice_label }}
-            </label>
+            <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
         </div>
         {% endfor %}
-        {% if form.mode.errors %}
-        <div class="text-danger small">{{ form.mode.errors }}</div>
-        {% endif %}
+        {% if form.mode.errors %}<div class="text-danger small">{{ form.mode.errors }}</div>{% endif %}
     </div>
 
-    <button type="submit" class="btn btn-success">Make Roster</button>
-    <a href="{% url 'baseball-list' %}" class="btn btn-link">Cancel</a>
+    <div id="opponent-team-wrap" class="mb-3" style="max-width:400px;display:none">
+        <label class="form-label fw-semibold">Opponent Team (CPU)</label>
+        {{ form.opponent_team }}
+        {% if form.opponent_team.errors %}<div class="text-danger small">{{ form.opponent_team.errors }}</div>{% endif %}
+    </div>
+
+    <div id="opponent-user-wrap" class="mb-3" style="max-width:400px;display:none">
+        <label class="form-label fw-semibold">Opponent Player</label>
+        {{ form.opponent_user }}
+        {% if form.opponent_user.errors %}<div class="text-danger small">{{ form.opponent_user.errors }}</div>{% endif %}
+    </div>
+
+    {% if team_chosen %}
+    <hr>
+    <div class="mb-3">
+        <label class="form-label small fw-semibold">
+            Pitcher <span class="text-muted fw-normal">(does not bat)</span>
+        </label>
+        {{ form.pitcher_field }}
+        {% if form.pitcher_field.errors %}<div class="text-danger small">{{ form.pitcher_field.errors }}</div>{% endif %}
+    </div>
+
+    {{ form.order }}
+    <label class="form-label small fw-semibold">Batting Order <span class="text-muted fw-normal">(drag to reorder)</span></label>
+    <ol class="list-group list-group-numbered" id="batting-list" style="max-width:500px">
+        {% for code, field in form.batting_fields %}
+        <li class="list-group-item d-flex align-items-center gap-2" data-pos="{{ code }}">
+            <span class="drag-handle text-muted" style="cursor:grab;font-size:1.1rem;user-select:none">⠿</span>
+            <div class="flex-grow-1">
+                <div class="small text-muted mb-1">{{ field.label }}</div>
+                {{ field }}
+                {% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}
+            </div>
+        </li>
+        {% endfor %}
+    </ol>
+    {% endif %}
+
+    <div class="mt-4">
+        <button type="submit" id="next-btn" class="btn btn-success">Next</button>
+        <a href="{% url 'baseball-list' %}" class="btn btn-link">Cancel</a>
+    </div>
 </form>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+document.getElementById('id_team').addEventListener('change', () => {
+    document.getElementById('id_action').value = 'choose_team';
+    document.getElementById('side-form').submit();
+});
+
+function syncModeUI() {
+    const checked = document.querySelector('input[name="mode"]:checked');
+    const mode = checked ? checked.value : '';
+    document.getElementById('opponent-team-wrap').style.display = mode === 'cpu_auto' ? '' : 'none';
+    document.getElementById('opponent-user-wrap').style.display = mode === 'multiplayer' ? '' : 'none';
+    document.getElementById('next-btn').textContent = mode === 'cpu_auto' ? 'Play Ball!' : 'Next';
+}
+document.querySelectorAll('input[name="mode"]').forEach(r => r.addEventListener('change', syncModeUI));
+syncModeUI();
+
+const battingList = document.getElementById('batting-list');
+if (battingList) {
+    const order = document.getElementById('id_order');
+    function sync() {
+        order.value = Array.from(battingList.children).map(li => li.dataset.pos).join(',');
+    }
+    new Sortable(battingList, { handle: '.drag-handle', animation: 150, onEnd: sync });
+    sync();
+}
+</script>
 {% endblock %}

@@ -1,10 +1,14 @@
+import json
+
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views import View
-from django.views.generic import ListView, DetailView, FormView
+from django.views.generic import ListView, DetailView
 
-from .forms import GameSetupForm, RosterForm, POSITIONS, BATTING_POSITIONS
+from .forms import Page1Form, SideRosterForm, POSITIONS, BATTING_POSITIONS
 from .models import Game, Player, Team, GameStat, position_pools, main_position
 from .engine import GameState, resolve_dice_roll, apply_in_play
 
@@ -65,6 +69,19 @@ def auto_fill_roster(team):
 def lineup_from_roster(roster):
     """9-name batting order from a 10-slot roster, preserving list order (pitcher excluded)."""
     return [r["name"] for r in roster if r["position"] != "P"]
+
+
+def cpu_roster_for(team):
+    """Full 10-slot roster (canonical order) auto-picked for a CPU-controlled team."""
+    picks = auto_fill_roster(team)  # {position_code: player_id}
+    players = {p.player_id: p for p in Player.objects.filter(player_id__in=picks.values())}
+    out = []
+    for code, _ in POSITIONS:
+        pid = picks.get(code)
+        if pid is None:
+            continue
+        out.append({"position": code, "player_id": pid, "name": str(players[pid])})
+    return out
 
 
 def _state_snapshot(gs: GameState) -> dict:
@@ -139,73 +156,185 @@ class GameListView(LoginRequiredMixin, ListView):
     template_name = "baseball/game_list.html"
 
     def get_queryset(self):
-        return Game.objects.filter(owner=self.request.user)
+        u = self.request.user
+        return (Game.objects.filter(Q(owner=u) | Q(player2=u))
+                .select_related("owner", "player2"))
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        for g in ctx["object_list"]:
+            g.away_username, g.home_username = self._side_usernames(g)
+        return ctx
+
+    @staticmethod
+    def _side_usernames(g):
+        def label(side):
+            if g.cpu_side == side:
+                return "cpu"
+            if g.mode == Game.MULTIPLAYER:
+                controller = g.owner if g.owner_side == side else g.player2
+                return controller.username if controller else "?"
+            return g.owner.username
+        return label("away"), label("home")
 
 
-class GameCreateView(LoginRequiredMixin, FormView):
-    form_class    = GameSetupForm
+class Page1View(LoginRequiredMixin, View):
     template_name = "baseball/game_setup.html"
 
-    def form_valid(self, form):
+    def get(self, request):
+        return render(request, self.template_name,
+                      {"form": Page1Form(request_user=request.user), "team_chosen": False})
+
+    def post(self, request):
+        team_id = request.POST.get("team")
+        team = Team.objects.filter(pk=team_id).first() if team_id else None
+        action = request.POST.get("action")
+
+        if action == "choose_team":
+            data = request.POST.copy()
+            if team:
+                for code, pid in auto_fill_roster(team).items():
+                    data.setdefault(code, str(pid))
+            form = Page1Form(data, team=team, request_user=request.user)
+            return render(request, self.template_name,
+                          {"form": form, "team_chosen": team is not None})
+
+        form = Page1Form(request.POST, team=team, request_user=request.user)
+        if not form.is_valid():
+            return render(request, self.template_name,
+                          {"form": form, "team_chosen": team is not None})
+
         cd = form.cleaned_data
-        self.request.session["bb_setup"] = {
-            "away_team_id":  cd["away_team"].team_id,
-            "home_team_id":  cd["home_team"].team_id,
-            "away_name":     cd["away_team"].name,
-            "home_name":     cd["home_team"].name,
-            "total_innings": cd["total_innings"],
+        side = cd["side"]
+        own_team = cd["team"]
+        own_roster = form.roster_for()
+
+        if cd["mode"] == Game.MULTIPLAYER:
+            opponent_user = cd["opponent_user"]
+            if side == "away":
+                away_team, home_team = own_team, None
+                away_roster, home_roster = own_roster, []
+                owner_side = "away"
+            else:
+                away_team, home_team = None, own_team
+                away_roster, home_roster = [], own_roster
+                owner_side = "home"
+
+            game = Game.objects.create(
+                owner=request.user, player2=opponent_user,
+                away_name=away_team.name if away_team else "",
+                home_name=home_team.name if home_team else "",
+                away_team=away_team, home_team=home_team,
+                total_innings=cd["total_innings"], mode=cd["mode"],
+                owner_side=owner_side,
+                status=Game.WAITING,
+                state={},
+                away_roster=away_roster, home_roster=home_roster,
+            )
+            return redirect("baseball-waiting", pk=game.pk)
+
+        if cd["mode"] == Game.CPU_AUTO:
+            opponent_team = cd["opponent_team"]
+            cpu_roster = cpu_roster_for(opponent_team)
+            if side == "away":
+                away_team, home_team = own_team, opponent_team
+                away_roster, home_roster = own_roster, cpu_roster
+                cpu_side = "home"
+            else:
+                away_team, home_team = opponent_team, own_team
+                away_roster, home_roster = cpu_roster, own_roster
+                cpu_side = "away"
+
+            gs = GameState(
+                away_team.name, home_team.name, cd["total_innings"],
+                away_lineup=lineup_from_roster(away_roster),
+                home_lineup=lineup_from_roster(home_roster),
+            )
+            game = Game.objects.create(
+                owner=request.user,
+                away_name=away_team.name, home_name=home_team.name,
+                away_team=away_team, home_team=home_team,
+                total_innings=cd["total_innings"], mode=cd["mode"],
+                cpu_side=cpu_side,
+                state=Game.state_to_dict(gs),
+                away_roster=away_roster, home_roster=home_roster,
+            )
+            return redirect("baseball-detail", pk=game.pk)
+
+        request.session["bb_setup"] = {
+            "side":          side,
+            "p2_side":       "home" if side == "away" else "away",
+            "team_id":       own_team.team_id,
+            "team_name":     own_team.name,
             "mode":          cd["mode"],
+            "total_innings": cd["total_innings"],
+            "roster":        own_roster,
         }
         return redirect("baseball-roster")
 
 
-class RosterView(LoginRequiredMixin, View):
+class Page2View(LoginRequiredMixin, View):
     template_name = "baseball/game_roster.html"
 
     def _setup(self, request):
         return request.session.get("bb_setup")
 
-    def _teams(self, setup):
-        away = get_object_or_404(Team, pk=setup["away_team_id"])
-        home = get_object_or_404(Team, pk=setup["home_team_id"])
-        return away, home
+    def _team_qs(self, setup):
+        return Team.objects.exclude(pk=setup["team_id"])
 
     def get(self, request):
         setup = self._setup(request)
         if not setup:
             return redirect("baseball-new")
-        away_team, home_team = self._teams(setup)
-        initial = {f"away_{code}": pid
-                   for code, pid in auto_fill_roster(away_team).items()}
-        form = RosterForm(away_team=away_team, home_team=home_team, initial=initial)
-        sides = [(setup["away_name"] + " (Away, CPU)", "away"),
-                 (setup["home_name"] + " (Home)", "home")]
+        form = SideRosterForm(team_queryset=self._team_qs(setup))
         return render(request, self.template_name,
-                      {"form": form, "setup": setup, "sides": sides})
+                      {"form": form, "setup": setup, "team_chosen": False})
 
     def post(self, request):
         setup = self._setup(request)
         if not setup:
             return redirect("baseball-new")
-        away_team, home_team = self._teams(setup)
-        form = RosterForm(request.POST, away_team=away_team, home_team=home_team)
-        sides = [(setup["away_name"] + " (Away, CPU)", "away"),
-                 (setup["home_name"] + " (Home)", "home")]
+        team_qs = self._team_qs(setup)
+        team_id = request.POST.get("team")
+        team = team_qs.filter(pk=team_id).first() if team_id else None
+        action = request.POST.get("action")
+
+        if action == "choose_team":
+            data = request.POST.copy()
+            if team:
+                for code, pid in auto_fill_roster(team).items():
+                    data.setdefault(code, str(pid))
+            form = SideRosterForm(data, team=team, team_queryset=team_qs)
+            return render(request, self.template_name,
+                          {"form": form, "setup": setup, "team_chosen": team is not None})
+
+        form = SideRosterForm(request.POST, team=team, team_queryset=team_qs)
         if not form.is_valid():
             return render(request, self.template_name,
-                          {"form": form, "setup": setup, "sides": sides})
-        away_roster = form.roster_for("away")
-        home_roster = form.roster_for("home")
+                          {"form": form, "setup": setup, "team_chosen": team is not None})
+
+        p2_team = form.cleaned_data["team"]
+        p2_roster = form.roster_for()
+        p1_team = get_object_or_404(Team, pk=setup["team_id"])
+
+        if setup["side"] == "away":
+            away_team, home_team = p1_team, p2_team
+            away_roster, home_roster = setup["roster"], p2_roster
+        else:
+            away_team, home_team = p2_team, p1_team
+            away_roster, home_roster = p2_roster, setup["roster"]
+
         gs = GameState(
-            setup["away_name"], setup["home_name"], setup["total_innings"],
+            away_team.name, home_team.name, setup["total_innings"],
             away_lineup=lineup_from_roster(away_roster),
             home_lineup=lineup_from_roster(home_roster),
         )
         game = Game.objects.create(
             owner=request.user,
-            away_name=setup["away_name"], home_name=setup["home_name"],
+            away_name=away_team.name, home_name=home_team.name,
             away_team=away_team, home_team=home_team,
             total_innings=setup["total_innings"], mode=setup["mode"],
+            cpu_side=None,
             state=Game.state_to_dict(gs),
             away_roster=away_roster, home_roster=home_roster,
         )
@@ -213,12 +342,104 @@ class RosterView(LoginRequiredMixin, View):
         return redirect("baseball-detail", pk=game.pk)
 
 
+class WaitingView(LoginRequiredMixin, View):
+    template_name = "baseball/game_waiting.html"
+
+    def get(self, request, pk):
+        game = get_object_or_404(Game, pk=pk, owner=request.user)
+        if game.status != Game.WAITING:
+            return redirect("baseball-detail", pk=game.pk)
+        return render(request, self.template_name, {"game": game})
+
+
+class Player2JoinView(LoginRequiredMixin, View):
+    template_name = "baseball/game_join.html"
+
+    def _game(self, request, pk):
+        game = get_object_or_404(Game, pk=pk, player2=request.user)
+        if game.status != Game.WAITING:
+            return None, redirect("baseball-detail", pk=game.pk)
+        return game, None
+
+    def _team_qs(self, game):
+        p1_team_id = game.away_team_id or game.home_team_id
+        return Team.objects.exclude(pk=p1_team_id)
+
+    def get(self, request, pk):
+        game, bail = self._game(request, pk)
+        if bail:
+            return bail
+        form = SideRosterForm(team_queryset=self._team_qs(game))
+        return render(request, self.template_name,
+                      {"form": form, "game": game, "team_chosen": False})
+
+    def post(self, request, pk):
+        game, bail = self._game(request, pk)
+        if bail:
+            return bail
+        team_qs = self._team_qs(game)
+        team_id = request.POST.get("team")
+        team = team_qs.filter(pk=team_id).first() if team_id else None
+        action = request.POST.get("action")
+
+        if action == "choose_team":
+            data = request.POST.copy()
+            if team:
+                for code, pid in auto_fill_roster(team).items():
+                    data.setdefault(code, str(pid))
+            form = SideRosterForm(data, team=team, team_queryset=team_qs)
+            return render(request, self.template_name,
+                          {"form": form, "game": game, "team_chosen": team is not None})
+
+        form = SideRosterForm(request.POST, team=team, team_queryset=team_qs)
+        if not form.is_valid():
+            return render(request, self.template_name,
+                          {"form": form, "game": game, "team_chosen": team is not None})
+
+        p2_team = form.cleaned_data["team"]
+        p2_roster = form.roster_for()
+
+        if game.owner_side == "away":
+            game.home_team, game.home_roster, game.home_name = p2_team, p2_roster, p2_team.name
+        else:
+            game.away_team, game.away_roster, game.away_name = p2_team, p2_roster, p2_team.name
+
+        gs = GameState(
+            game.away_name, game.home_name, game.total_innings,
+            away_lineup=lineup_from_roster(game.away_roster),
+            home_lineup=lineup_from_roster(game.home_roster),
+        )
+        game.state = Game.state_to_dict(gs)
+        game.status = Game.ACTIVE
+        game.save()
+        return redirect("baseball-detail", pk=game.pk)
+
+
+class CancelWaitingView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        game = get_object_or_404(
+            Game, Q(owner=request.user) | Q(player2=request.user),
+            pk=pk, status=Game.WAITING,
+        )
+        game.delete()
+        return redirect("baseball-list")
+
+
 class GameDetailView(LoginRequiredMixin, DetailView):
     model         = Game
     template_name = "baseball/game_detail.html"
 
     def get_queryset(self):
-        return Game.objects.filter(owner=self.request.user)
+        u = self.request.user
+        return Game.objects.filter(Q(owner=u) | Q(player2=u))
+
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if self.object.status == Game.WAITING:
+            if request.user == self.object.owner:
+                return redirect("baseball-waiting", pk=self.object.pk)
+            return redirect("baseball-join", pk=self.object.pk)
+        return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -229,6 +450,14 @@ class GameDetailView(LoginRequiredMixin, DetailView):
             away, home = gs.away_score, gs.home_score
             ctx["winner"] = gs.away_name if away > home else (
                 gs.home_name if home > away else None)
+        if self.object.mode == Game.MULTIPLAYER:
+            if self.request.user == self.object.owner:
+                ctx["my_side"] = self.object.owner_side
+                opp = self.object.player2
+            else:
+                ctx["my_side"] = "home" if self.object.owner_side == "away" else "away"
+                opp = self.object.owner
+            ctx["opponent_username"] = opp.username if opp else ""
         if self.object.away_roster:
             stats = {s.player_id: s.line
                      for s in GameStat.objects.filter(game=self.object)}
@@ -244,15 +473,34 @@ class GameDetailView(LoginRequiredMixin, DetailView):
                           else self.object.home_roster)
             cur_pid = _pid_for_name(cur_roster, gs.current_batter)
             ctx["current_batter_line"] = stats.get(cur_pid, "") if cur_pid else ""
+
+        # Newest-first display order, with an extra-innings separator flagged on
+        # the last (chronologically first) extra-inning play — so it renders
+        # immediately after that play once the list is reversed for display.
+        seen_extra = False
+        annotated = []
+        for play in self.object.play_log:
+            is_extra = play.get("play_inning", 0) > self.object.total_innings
+            annotated.append({**play, "starts_extra": is_extra and not seen_extra})
+            seen_extra = seen_extra or is_extra
+        ctx["play_log_reversed"] = list(reversed(annotated))
         return ctx
 
 
 class RollView(LoginRequiredMixin, View):
     def post(self, request, pk):
-        game = get_object_or_404(Game, pk=pk, owner=request.user)
+        game = get_object_or_404(
+            Game, Q(owner=request.user) | Q(player2=request.user), pk=pk,
+        )
         if game.status == Game.FINISHED:
             return JsonResponse({"error": "game over"}, status=400)
-        gs   = game.load_state()
+        gs = game.load_state()
+        if game.mode == Game.MULTIPLAYER:
+            my_side = (game.owner_side if request.user == game.owner
+                       else ("home" if game.owner_side == "away" else "away"))
+            my_half = "bottom" if my_side == "home" else "top"
+            if gs.half != my_half:
+                return JsonResponse({"error": "not your turn"}, status=403)
         play = _advance_game(gs)
         roster = game.away_roster if play["play_half"] == "top" else game.home_roster
         pid = _pid_for_name(roster, play["batter"])
@@ -298,3 +546,31 @@ class SimulateView(LoginRequiredMixin, View):
         game.status   = Game.FINISHED
         game.save()
         return JsonResponse({"plays": plays})
+
+
+class ReplayView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        game = get_object_or_404(Game, pk=pk, owner=request.user)
+        if game.mode == Game.MULTIPLAYER:
+            return JsonResponse({"error": "replay not supported for multiplayer games"}, status=400)
+        try:
+            body = json.loads(request.body or b"{}")
+        except json.JSONDecodeError:
+            body = {}
+        mode = Game.AUTO_PLAY if body.get("autoplay") else game.mode
+
+        gs = GameState(
+            game.away_name, game.home_name, game.total_innings,
+            away_lineup=lineup_from_roster(game.away_roster),
+            home_lineup=lineup_from_roster(game.home_roster),
+        )
+        new_game = Game.objects.create(
+            owner=request.user,
+            away_name=game.away_name, home_name=game.home_name,
+            away_team=game.away_team, home_team=game.home_team,
+            total_innings=game.total_innings, mode=mode,
+            cpu_side=game.cpu_side,
+            state=Game.state_to_dict(gs),
+            away_roster=game.away_roster, home_roster=game.home_roster,
+        )
+        return JsonResponse({"redirect_url": reverse("baseball-detail", args=[new_game.pk])})
