@@ -1,5 +1,6 @@
 import json
 
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Q
 from django.http import JsonResponse
@@ -9,8 +10,9 @@ from django.views import View
 from django.views.generic import ListView, DetailView
 
 from .forms import Page1Form, SideRosterForm, POSITIONS, BATTING_POSITIONS
-from .models import Game, Player, Team, GameStat, position_pools, main_position
-from .engine import GameState, resolve_dice_roll, apply_in_play
+from .models import Game, Player, Team, GameStat, PlayerCareerStats, position_pools, main_position
+from .engine import GameState, resolve_dice_roll, apply_in_play, stat_based_weights
+from .params import STAT_BASED_MIN_AB
 from .stadiums import stadium_context
 
 _HIT_STAT   = {"single": "singles", "double": "doubles",
@@ -30,11 +32,44 @@ def _stat_delta(outcome):
     return delta
 
 
+@login_required
+def career_stats_api(request, player_id):
+    row = PlayerCareerStats.objects.filter(player_id=player_id).order_by("-season").first()
+    if not row:
+        return JsonResponse({"found": False})
+    return JsonResponse({
+        "found": True,
+        "season": row.season,
+        "at_bats": row.at_bats,
+        "hits": row.hits,
+        "runs": row.runs,
+        "rbis": row.rbis,
+        "doubles": row.doubles,
+        "triples": row.triples,
+        "home_runs": row.home_runs,
+        "walks": row.walks,
+        "strikeouts": row.strikeouts,
+        "stolen_bases": row.stolen_bases,
+    })
+
+
 def _pid_for_name(roster, name):
     for e in roster:
         if e.get("name") == name:
             return e.get("player_id")
     return None
+
+
+def _career_weights_for(player_id):
+    """Stat-based outcome weights for a batter, or None to use the dice table."""
+    if not player_id:
+        return None
+    row = PlayerCareerStats.objects.filter(player_id=player_id).values(
+        "at_bats", "hits", "doubles", "triples", "home_runs", "walks", "strikeouts",
+    ).first()
+    if not row or row["at_bats"] < STAT_BASED_MIN_AB:
+        return None
+    return stat_based_weights(row)
 
 
 def _apply_delta(game, player_id, delta):
@@ -103,18 +138,22 @@ def _state_snapshot(gs: GameState) -> dict:
     }
 
 
-def _advance_game(gs: GameState) -> dict:
+def _advance_game(gs: GameState, roster) -> dict:
     # Capture before any mutation so play-log labels show the inning/half of the play.
     play_half   = gs.half
     play_inning = gs.inning
     batter      = gs.current_batter
 
-    if gs.current_batter == "Tushy Scar":
+    if batter == "Tushy Scar":
         d1, d2 = 6, 6
         msg, _ = apply_in_play(gs, "home_run")
         outcome = "home_run"
+        method = "dice"
     else:
-        d1, d2, outcome, msg = resolve_dice_roll(gs)
+        pid = _pid_for_name(roster, batter)
+        weights = _career_weights_for(pid)
+        d1, d2, outcome, msg = resolve_dice_roll(gs, stat_weights=weights)
+        method = "stat" if weights is not None else "dice"
     gs.reset_count()
     gs.advance_lineup()
 
@@ -124,7 +163,7 @@ def _advance_game(gs: GameState) -> dict:
     # Walk-off: bottom half of final inning, home leads after the at-bat
     if gs.half == "bottom" and is_final and gs.home_score > gs.away_score:
         gs.game_over = True
-        return dict(d1=d1, d2=d2, outcome=outcome, message=msg,
+        return dict(d1=d1, d2=d2, outcome=outcome, message=msg, method=method,
                     play_half=play_half, play_inning=play_inning,
                     batter=batter, half_over=True, game_over=True,
                     state=_state_snapshot(gs))
@@ -146,7 +185,7 @@ def _advance_game(gs: GameState) -> dict:
                 gs.half = "top"
                 gs.reset_half()
 
-    return dict(d1=d1, d2=d2, outcome=outcome, message=msg,
+    return dict(d1=d1, d2=d2, outcome=outcome, message=msg, method=method,
                 play_half=play_half, play_inning=play_inning,
                 batter=batter, half_over=half_over, game_over=gs.game_over,
                 state=_state_snapshot(gs))
@@ -503,8 +542,8 @@ class RollView(LoginRequiredMixin, View):
             my_half = "bottom" if my_side == "home" else "top"
             if gs.half != my_half:
                 return JsonResponse({"error": "not your turn"}, status=403)
-        play = _advance_game(gs)
-        roster = game.away_roster if play["play_half"] == "top" else game.home_roster
+        roster = game.away_roster if gs.half == "top" else game.home_roster
+        play = _advance_game(gs, roster)
         pid = _pid_for_name(roster, play["batter"])
         delta = _stat_delta(play["outcome"])
         if pid and delta:
@@ -527,8 +566,8 @@ class SimulateView(LoginRequiredMixin, View):
         gs    = game.load_state()
         plays, totals = [], {}
         while not gs.game_over:
-            play = _advance_game(gs)
-            roster = game.away_roster if play["play_half"] == "top" else game.home_roster
+            roster = game.away_roster if gs.half == "top" else game.home_roster
+            play = _advance_game(gs, roster)
             pid = _pid_for_name(roster, play["batter"])
             if pid:
                 acc = totals.setdefault(pid, {})

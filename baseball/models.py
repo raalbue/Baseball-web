@@ -167,14 +167,12 @@ class MLBGame(models.Model):
         db_table = 'game'
 
 
-class Stats(models.Model):
+class PlayerCareerStats(models.Model):
     stat_id           = models.AutoField(primary_key=True)
     player            = models.ForeignKey(
         Player, db_column='player_id', on_delete=models.DO_NOTHING,
     )
-    game              = models.ForeignKey(
-        MLBSchedule, db_column='game_id', on_delete=models.DO_NOTHING,
-    )
+    season            = models.IntegerField()
     at_bats           = models.IntegerField(default=0)
     hits              = models.IntegerField(default=0)
     runs              = models.IntegerField(default=0)
@@ -196,7 +194,8 @@ class Stats(models.Model):
 
     class Meta:
         managed  = False
-        db_table = 'stats'
+        db_table = 'player_career_stats'
+        unique_together = (('player', 'season'),)
 
 
 class GameParticipant(models.Model):

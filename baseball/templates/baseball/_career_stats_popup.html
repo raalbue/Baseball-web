@@ -1,0 +1,67 @@
+<div id="career-stats-box" class="d-none"
+     style="position:absolute; z-index:1060; background:#fff; border:1px solid #ced4da;
+            border-radius:.375rem; box-shadow:0 .25rem .5rem rgba(0,0,0,.15);
+            padding:.5rem .75rem; white-space:nowrap; font-size:.85rem;"></div>
+
+<script>
+// Career stats hover popup. Buttons carry either data-select-id (read a live
+// <select>'s current value) or data-player-id (fixed, e.g. an in-game lineup).
+const statsBox = document.getElementById('career-stats-box');
+const statsCache = {};
+
+function renderStatsRow(s) {
+    if (!s.found) {
+        return '<span class="text-muted">No career stats on file</span>';
+    }
+    const cols = [
+        ['AB', s.at_bats], ['H', s.hits], ['R', s.runs], ['RBI', s.rbis],
+        ['2B', s.doubles], ['3B', s.triples], ['HR', s.home_runs],
+        ['BB', s.walks], ['K', s.strikeouts], ['SB', s.stolen_bases],
+    ];
+    return '<div class="d-flex gap-3">' + cols.map(([label, val]) =>
+        `<div class="text-center"><div class="text-muted small">${label}</div><div class="fw-semibold">${val}</div></div>`
+    ).join('') + '</div>';
+}
+
+function showStatsBox(btn, html) {
+    statsBox.innerHTML = html;
+    statsBox.classList.remove('d-none');
+    const rect = btn.getBoundingClientRect();
+    const boxHeight = statsBox.offsetHeight;
+    const fitsBelow = rect.bottom + 6 + boxHeight <= window.innerHeight;
+    const top = fitsBelow
+        ? rect.bottom + window.scrollY + 6
+        : rect.top + window.scrollY - boxHeight - 6;
+    statsBox.style.left = (rect.left + window.scrollX) + 'px';
+    statsBox.style.top = Math.max(top, window.scrollY) + 'px';
+}
+
+function hideStatsBox() {
+    statsBox.classList.add('d-none');
+}
+
+document.querySelectorAll('.career-stats-btn').forEach(btn => {
+    btn.addEventListener('mouseenter', () => {
+        let playerId = btn.dataset.playerId || '';
+        if (!playerId && btn.dataset.selectId) {
+            const select = document.getElementById(btn.dataset.selectId);
+            playerId = select ? select.value : '';
+        }
+        if (!playerId) {
+            showStatsBox(btn, '<span class="text-muted">Select a player first</span>');
+            return;
+        }
+        if (statsCache[playerId]) {
+            showStatsBox(btn, renderStatsRow(statsCache[playerId]));
+            return;
+        }
+        fetch(`{% url 'baseball-career-stats-api' 0 %}`.replace('0', playerId))
+            .then(r => r.json())
+            .then(data => {
+                statsCache[playerId] = data;
+                showStatsBox(btn, renderStatsRow(data));
+            });
+    });
+    btn.addEventListener('mouseleave', hideStatsBox);
+});
+</script>

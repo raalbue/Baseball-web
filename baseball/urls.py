@@ -5,6 +5,7 @@ urlpatterns = [
     path("",                   views.GameListView.as_view(),   name="baseball-list"),
     path("new/",               views.Page1View.as_view(),      name="baseball-new"),
     path("roster/",            views.Page2View.as_view(),      name="baseball-roster"),
+    path("api/career-stats/<int:player_id>/", views.career_stats_api, name="baseball-career-stats-api"),
     path("<int:pk>/",          views.GameDetailView.as_view(), name="baseball-detail"),
     path("<int:pk>/roll/",     views.RollView.as_view(),       name="baseball-roll"),
     path("<int:pk>/simulate/", views.SimulateView.as_view(),   name="baseball-simulate"),

@@ -4,7 +4,7 @@ import random
 from typing import Dict, List, Tuple
 from .params import (
     LINEUP, STRIKE_PROB, FOUL_PROB, DOUBLE_PLAY_PROB,
-    CONTACT_PROB, OUTCOME_WEIGHTS, HIT_BASES, DICE_TABLE,
+    CONTACT_PROB, OUTCOME_WEIGHTS, HIT_BASES, DICE_TABLE, STAT_OUT_SPLIT,
 )
 
 
@@ -280,13 +280,40 @@ def apply_sacrifice(state: GameState) -> Tuple[str, bool]:
     return msg, True
 
 
-def resolve_dice_roll(state: GameState) -> Tuple[int, int, str, str]:
-    """Roll 2d6, look up DICE_TABLE by (min, max) pair, apply event to state.
+def stat_based_weights(row: Dict[str, int]) -> Dict[str, int]:
+    """
+    Build a {outcome: weight} dict from a batter's career counting stats.
+
+    :param row: dict with at_bats, hits, doubles, triples, home_runs,
+                walks, strikeouts (extra keys ignored).
+    """
+    singles = row["hits"] - row["doubles"] - row["triples"] - row["home_runs"]
+    in_play_outs = row["at_bats"] - row["hits"] - row["strikeouts"]
+    return {
+        "walk": row["walks"],
+        "strikeout": row["strikeouts"],
+        "single": singles,
+        "double": row["doubles"],
+        "triple": row["triples"],
+        "home_run": row["home_runs"],
+        "groundout": round(in_play_outs * STAT_OUT_SPLIT["groundout"]),
+        "flyout": round(in_play_outs * STAT_OUT_SPLIT["flyout"]),
+        "sacrifice": round(in_play_outs * STAT_OUT_SPLIT["sacrifice"]),
+    }
+
+
+def resolve_dice_roll(state: GameState, stat_weights: Dict[str, int] = None) -> Tuple[int, int, str, str]:
+    """Roll 2d6 (always, for display), then either look up DICE_TABLE by the
+    die pair or -- when stat_weights is given -- draw the outcome from the
+    batter's own career-stat weights. Applies the event to state.
 
     Returns (d1, d2, outcome_key, play_message).
     """
     d1, d2 = roll_dice()
-    outcome = DICE_TABLE[(min(d1, d2), max(d1, d2))]
+    if stat_weights is not None:
+        outcome = weighted_choice(stat_weights)
+    else:
+        outcome = DICE_TABLE[(min(d1, d2), max(d1, d2))]
     if outcome == "walk":
         msg, _ = apply_walk(state)
     elif outcome == "strikeout":

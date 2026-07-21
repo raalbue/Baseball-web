@@ -146,7 +146,7 @@ const TOTAL_INN   = {{ game.total_innings }};
       </button>
       {% else %}
       <button id="btn-roll" class="btn btn-primary btn-lg w-100">
-        🎲 Roll Dice
+        ⚾ Pitch
       </button>
       {% endif %}
     </div>
@@ -160,7 +160,8 @@ const TOTAL_INN   = {{ game.total_innings }};
         {% for play in play_log_reversed %}
         <p class="mb-1">
           [{% if play.play_half == "top" %}TOP{% else %}BOT{% endif %} {{ play.play_inning }}]
-          🎲 [{{ play.d1 }}][{{ play.d2 }}] &mdash; {{ play.message }}
+          ⚾ [{{ play.d1 }}][{{ play.d2 }}] &mdash; {{ play.message }}
+          {% if play.method|default:"dice" == "dice" %}(🎲){% else %}(📊){% endif %}
         </p>
         {% if play.starts_extra %}
         <p class="text-center fw-bold text-danger my-2">========= E X T R A &nbsp; I N N I N G S =========</p>
@@ -185,7 +186,11 @@ const TOTAL_INN   = {{ game.total_innings }};
         {% for entry in side_roster %}
         {% if entry.position != "P" %}
         <li class="list-group-item d-flex justify-content-between">
-          <span>{{ entry.name }}</span>
+          <span>
+            {{ entry.name }}
+            <button type="button" class="btn btn-sm btn-outline-secondary career-stats-btn py-0 px-1 ms-1"
+                    data-player-id="{{ entry.player_id }}">Career Stats</button>
+          </span>
           <span>
             <small id="stat-{{ entry.player_id }}" class="text-primary fw-semibold me-2">{{ entry.line }}</small>
             <small class="text-muted">{{ entry.position }}</small>
@@ -201,4 +206,5 @@ const TOTAL_INN   = {{ game.total_innings }};
 {% endif %}
 
 <script src="{% static 'baseball/js/game.js' %}"></script>
+{% include "baseball/_career_stats_popup.html" %}
 {% endblock %}

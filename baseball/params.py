@@ -110,6 +110,15 @@ DICE_EVENT_LABELS = {
     "sacrifice": "SACRIFICE",
 }
 
+# Minimum career at-bats before stat-based outcome resolution kicks in;
+# below this, the fixed dice table is used (small-sample fallback).
+STAT_BASED_MIN_AB = 200
+
+# No per-batter groundout/flyout/sacrifice split exists in the imported data
+# (Retrosheet b_sh/b_sf were never loaded); split each batter's leftover
+# in-play outs by this fixed ratio instead.
+STAT_OUT_SPLIT = {"groundout": 0.55, "flyout": 0.43, "sacrifice": 0.02}
+
 # --- Sound effects (reuse mytimer's wav library) -----------------------------
 SOUND_MAP = {
     "play_ball": "1.wav",

@@ -64,8 +64,14 @@
         <label class="form-label small fw-semibold">
             Pitcher <span class="text-muted fw-normal">(does not bat)</span>
         </label>
-        {{ form.pitcher_field }}
-        {% if form.pitcher_field.errors %}<div class="text-danger small">{{ form.pitcher_field.errors }}</div>{% endif %}
+        <div class="d-flex align-items-center gap-2" style="max-width:500px">
+            <div class="flex-grow-1">
+                {{ form.pitcher_field }}
+                {% if form.pitcher_field.errors %}<div class="text-danger small">{{ form.pitcher_field.errors }}</div>{% endif %}
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary career-stats-btn"
+                    data-select-id="{{ form.pitcher_field.id_for_label }}">Career Stats</button>
+        </div>
     </div>
 
     {{ form.order }}
@@ -79,6 +85,8 @@
                 {{ field }}
                 {% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}
             </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary career-stats-btn"
+                    data-select-id="{{ field.id_for_label }}">Career Stats</button>
         </li>
         {% endfor %}
     </ol>
@@ -117,4 +125,6 @@ if (battingList) {
     sync();
 }
 </script>
+
+{% include "baseball/_career_stats_popup.html" %}
 {% endblock %}

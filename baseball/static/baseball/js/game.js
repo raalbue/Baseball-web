@@ -43,10 +43,14 @@ function updateDiamond(bases) {
     document.getElementById('base-marker-3').classList.toggle('occupied', !!bases[2]);
 }
 
-function showDice(d1, d2, outcome) {
+function methodTag(method) {
+    return (method || 'dice') === 'dice' ? '(🎲)' : '(📊)';
+}
+
+function showDice(d1, d2, outcome, method) {
     document.getElementById('dice-roll').textContent = `[${d1}]  [${d2}]`;
     document.getElementById('dice-outcome').textContent =
-        outcome.replace(/_/g, ' ').toUpperCase();
+        `${outcome.replace(/_/g, ' ').toUpperCase()} ${methodTag(method)}`;
 }
 
 let inExtraInnings = false;
@@ -65,7 +69,7 @@ function appendPlay(play) {
     const p = document.createElement('p');
     p.className = 'mb-1';
     const half = play.play_half === 'top' ? 'TOP' : 'BOT';
-    p.textContent = `[${half} ${play.play_inning}] 🎲 [${play.d1}][${play.d2}] — ${play.message}`;
+    p.textContent = `[${half} ${play.play_inning}] ⚾ [${play.d1}][${play.d2}] — ${play.message} ${methodTag(play.method)}`;
     log.prepend(p);
     log.scrollTop = 0;
 }
@@ -172,7 +176,7 @@ async function doSimulate() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function handlePlay(play) {
-    showDice(play.d1, play.d2, play.outcome);
+    showDice(play.d1, play.d2, play.outcome, play.method);
     appendPlay(play);
     updateScoreboard(play.state);
     if (play.stat_update) {
