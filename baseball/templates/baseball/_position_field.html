@@ -1,0 +1,6 @@
+{% if all_star %}
+<input type="text" class="form-control form-control-sm mb-1 player-search"
+       data-select="{{ field.id_for_label }}" placeholder="Search players…">
+{% endif %}
+{{ field }}
+{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}

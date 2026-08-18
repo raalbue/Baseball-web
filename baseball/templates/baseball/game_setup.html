@@ -4,6 +4,7 @@
 <form method="post" class="mt-3" id="side-form">
     {% csrf_token %}
     <input type="hidden" name="action" id="id_action" value="next">
+    <input type="hidden" name="saved_roster_id" id="id_saved_roster_id" value="">
 
     {% if form.non_field_errors %}
     <div class="alert alert-danger">{{ form.non_field_errors }}</div>
@@ -25,6 +26,8 @@
         {% if form.team.errors %}<div class="text-danger small">{{ form.team.errors }}</div>{% endif %}
     </div>
 
+    {% include "baseball/_saved_roster_controls.html" %}
+
     <div class="mb-3" style="max-width:400px">
         <label class="form-label fw-semibold">Innings</label>
         {% for radio in form.total_innings %}
@@ -33,6 +36,36 @@
             <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
         </div>
         {% endfor %}
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label fw-semibold d-block">Streaky Player</label>
+        <div class="form-check">
+            {{ form.streaky_per_game }}
+            <label class="form-check-label" for="{{ form.streaky_per_game.id_for_label }}">Per game</label>
+        </div>
+        <div class="form-check">
+            {{ form.streaky_per_inning }}
+            <label class="form-check-label" for="{{ form.streaky_per_inning.id_for_label }}">Per inning</label>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label fw-semibold d-block">Weather</label>
+        <div class="d-flex gap-3 flex-wrap align-items-end">
+            <div>
+                <label class="form-label small mb-1" for="{{ form.weather_temperature_f.id_for_label }}">Temp (&deg;F)</label>
+                {{ form.weather_temperature_f }}
+            </div>
+            <div>
+                <label class="form-label small mb-1" for="{{ form.weather_wind.id_for_label }}">Wind</label>
+                {{ form.weather_wind }}
+            </div>
+            <div>
+                <label class="form-label small mb-1" for="{{ form.weather_sky.id_for_label }}">Sky</label>
+                {{ form.weather_sky }}
+            </div>
+        </div>
     </div>
 
     <div class="mb-3">
@@ -66,11 +99,19 @@
         </label>
         <div class="d-flex align-items-center gap-2" style="max-width:500px">
             <div class="flex-grow-1">
-                {{ form.pitcher_field }}
-                {% if form.pitcher_field.errors %}<div class="text-danger small">{{ form.pitcher_field.errors }}</div>{% endif %}
+                {% include "baseball/_position_field.html" with field=form.pitcher_field all_star=form.all_star %}
             </div>
             <button type="button" class="btn btn-sm btn-outline-secondary career-stats-btn"
                     data-select-id="{{ form.pitcher_field.id_for_label }}">Career Stats</button>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label small fw-semibold d-block">
+            Bullpen <span class="text-muted fw-normal">(pick 2-4 relievers)</span>
+        </label>
+        <div style="max-width:500px">
+            {% include "baseball/_bullpen_field.html" with field=form.bullpen all_star=form.all_star %}
         </div>
     </div>
 
@@ -82,8 +123,7 @@
             <span class="drag-handle text-muted" style="cursor:grab;font-size:1.1rem;user-select:none">⠿</span>
             <div class="flex-grow-1">
                 <div class="small text-muted mb-1">{{ field.label }}</div>
-                {{ field }}
-                {% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}
+                {% include "baseball/_position_field.html" with field=field all_star=form.all_star %}
             </div>
             <button type="button" class="btn btn-sm btn-outline-secondary career-stats-btn"
                     data-select-id="{{ field.id_for_label }}">Career Stats</button>
@@ -124,6 +164,37 @@ if (battingList) {
     new Sortable(battingList, { handle: '.drag-handle', animation: 150, onEnd: sync });
     sync();
 }
+
+document.querySelectorAll('.player-search').forEach((input) => {
+    const select = document.getElementById(input.dataset.select);
+    if (!select) return;
+    input.addEventListener('input', () => {
+        const q = input.value.trim().toLowerCase();
+        const matches = [];
+        Array.from(select.options).forEach((opt) => {
+            if (!opt.value) return;  // keep the "— select —" placeholder visible
+            const isMatch = !q || opt.text.toLowerCase().includes(q);
+            opt.hidden = !isMatch;
+            if (isMatch) matches.push(opt);
+        });
+        if (q && matches.length === 1) {
+            select.value = matches[0].value;
+            select.dispatchEvent(new Event('change'));
+        }
+    });
+});
+
+document.querySelectorAll('.bullpen-search').forEach((input) => {
+    const list = document.getElementById(input.dataset.target);
+    if (!list) return;
+    input.addEventListener('input', () => {
+        const q = input.value.trim().toLowerCase();
+        list.querySelectorAll('.bullpen-option').forEach((row) => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = (!q || text.includes(q)) ? '' : 'none';
+        });
+    });
+});
 </script>
 
 {% include "baseball/_career_stats_popup.html" %}

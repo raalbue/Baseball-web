@@ -1,6 +1,6 @@
 from django import forms
 from django.contrib.auth import get_user_model
-from .models import Game, Team, Player, position_pools
+from .models import Game, Team, Player, position_pools, is_all_star_team
 
 POSITIONS = [
     ("P",  "Pitcher"),
@@ -15,6 +15,23 @@ POSITIONS = [
     ("DH", "Designated Hitter"),
 ]
 BATTING_POSITIONS = [code for code, _ in POSITIONS if code != "P"]
+BULLPEN_MIN = 2
+BULLPEN_MAX = 4
+
+
+class _TeamLabelMixin:
+    """Trailing team abbreviation on player labels, for All-Star pools where
+    multiple teams' players are mixed together."""
+    def label_from_instance(self, obj):
+        return f"{obj} ({obj.team_abbrev})" if obj.team_abbrev else str(obj)
+
+
+class _PlayerChoiceField(_TeamLabelMixin, forms.ModelChoiceField):
+    pass
+
+
+class _PlayerMultipleChoiceField(_TeamLabelMixin, forms.ModelMultipleChoiceField):
+    pass
 
 
 class SideRosterForm(forms.Form):
@@ -22,6 +39,7 @@ class SideRosterForm(forms.Form):
 
     def __init__(self, *args, team=None, team_queryset=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.all_star = is_all_star_team(team)
         self.fields["team"] = forms.ModelChoiceField(
             queryset=team_queryset if team_queryset is not None else Team.objects.all(),
             label="Team",
@@ -29,15 +47,23 @@ class SideRosterForm(forms.Form):
             widget=forms.Select(attrs={"class": "form-select", "id": "id_team"}),
         )
         pools = position_pools(team) if team else {}
+        field_cls = _PlayerChoiceField if self.all_star else forms.ModelChoiceField
         for code, label in POSITIONS:
             ids = pools.get(code, [])
             qs = Player.objects.filter(player_id__in=ids) if team else Player.objects.none()
-            self.fields[code] = forms.ModelChoiceField(
+            self.fields[code] = field_cls(
                 queryset=qs,
                 label=label,
                 empty_label=f"— select {label.lower()} —",
                 widget=forms.Select(attrs={"class": "form-select"}),
             )
+        bullpen_cls = _PlayerMultipleChoiceField if self.all_star else forms.ModelMultipleChoiceField
+        self.fields["bullpen"] = bullpen_cls(
+            queryset=(Player.objects.filter(player_id__in=pools.get("P", []))
+                      if team else Player.objects.none()),
+            required=True, label="Bullpen",
+            widget=forms.CheckboxSelectMultiple(attrs={"class": "form-check-input"}),
+        )
         self.fields["order"] = forms.CharField(
             required=False,
             initial=",".join(BATTING_POSITIONS),
@@ -63,6 +89,12 @@ class SideRosterForm(forms.Form):
                 "Each player can only fill one position "
                 "(except a pitcher may also be the DH)."
             )
+        bullpen = cleaned.get("bullpen")
+        if bullpen is not None:
+            if not (BULLPEN_MIN <= len(bullpen) <= BULLPEN_MAX):
+                self.add_error("bullpen", f"Pick {BULLPEN_MIN}-{BULLPEN_MAX} relievers.")
+            elif p_pick and any(p.player_id == p_pick.player_id for p in bullpen):
+                self.add_error("bullpen", "Your starting pitcher can't also be in the bullpen.")
         return cleaned
 
     def roster_for(self):
@@ -76,6 +108,11 @@ class SideRosterForm(forms.Form):
             p = self.cleaned_data[code]
             out.append({"position": code, "player_id": p.player_id, "name": str(p)})
         return out
+
+    def bullpen_for(self):
+        """List of {player_id, name} for the picked relievers."""
+        return [{"player_id": p.player_id, "name": str(p)}
+                for p in self.cleaned_data["bullpen"]]
 
 
 class Page1Form(SideRosterForm):
@@ -97,6 +134,26 @@ class Page1Form(SideRosterForm):
             choices=self.INNINGS_CHOICES, coerce=int, initial=3,
             widget=forms.RadioSelect,
         )
+        self.fields["streaky_per_game"] = forms.BooleanField(
+            required=False, label="Streaky player (per game)",
+            widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+        )
+        self.fields["streaky_per_inning"] = forms.BooleanField(
+            required=False, label="Streaky player (per inning)",
+            widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+        )
+        self.fields["weather_temperature_f"] = forms.IntegerField(
+            required=False, initial=70, label="Temperature (°F)",
+            widget=forms.NumberInput(attrs={"class": "form-control form-control-sm", "style": "max-width:100px"}),
+        )
+        self.fields["weather_wind"] = forms.ChoiceField(
+            choices=Game.WIND_CHOICES, initial="calm", label="Wind",
+            widget=forms.Select(attrs={"class": "form-select form-select-sm", "style": "max-width:160px"}),
+        )
+        self.fields["weather_sky"] = forms.ChoiceField(
+            choices=Game.SKY_CHOICES, initial="overcast", label="Sky",
+            widget=forms.Select(attrs={"class": "form-select form-select-sm", "style": "max-width:160px"}),
+        )
         self.fields["opponent_team"] = forms.ModelChoiceField(
             queryset=Team.objects.all(), required=False,
             label="Opponent Team (CPU)",
@@ -115,6 +172,8 @@ class Page1Form(SideRosterForm):
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned.get("weather_temperature_f") in (None, ""):
+            cleaned["weather_temperature_f"] = 70
         team = cleaned.get("team")
         opp  = cleaned.get("opponent_team")
         mode = cleaned.get("mode")

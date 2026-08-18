@@ -3,11 +3,22 @@
 const CSRF = () =>
     document.querySelector('#csrf-form [name=csrfmiddlewaretoken]').value;
 
+const OUT_FLASH_MS = 500;
+const RUNNER_ANIM_MS = 550;
+
 const sfx = {
-    play_ball: new Audio(SOUND_PLAY),
-    home_run:  new Audio(SOUND_HR),
-    win:       new Audio(SOUND_WIN),
+    play_ball:     new Audio(SOUND_PLAY),
+    home_run:      new Audio(SOUND_HR),
+    win:           new Audio(SOUND_WIN),
+    home_run_wood: new Audio(SOUND_HR_WOOD),
+    crowd_cheer:   new Audio(SOUND_CROWD),
+    single:        new Audio(SOUND_SINGLE),
+    double:        new Audio(SOUND_DOUBLE),
+    triple:        new Audio(SOUND_TRIPLE),
+    strikeout:     new Audio(SOUND_STRIKEOUT),
 };
+
+sfx.strikeout.playbackRate = 3;
 
 function playSound(key) {
     const a = sfx[key];
@@ -16,35 +27,203 @@ function playSound(key) {
     a.play().catch(() => {});
 }
 
-// --- DOM helpers -----------------------------------------------------------
-
-function updateScoreboard(state) {
-    document.getElementById('sb-half').textContent = state.half === 'top' ? 'Top' : 'Bottom';
-    document.getElementById('sb-inning').textContent = state.inning;
-    document.getElementById('sb-away-score').textContent = state.away_score;
-    document.getElementById('sb-home-score').textContent = state.home_score;
-    document.getElementById('sb-outs').textContent = state.outs;
-    document.getElementById('sb-batter').textContent = state.current_batter;
-    const lineEl = document.getElementById('sb-batter-line');
-    if (lineEl) lineEl.textContent = state.batter_line ? `(${state.batter_line})` : '';
-    document.getElementById('sb-team').textContent = state.batting_team;
-
-    document.getElementById('sb-away-bat').textContent =
-        state.half === 'top' ? '← batting' : '';
-    document.getElementById('sb-home-bat').textContent =
-        state.half === 'bottom' ? '← batting' : '';
-
-    updateDiamond(state.bases);
+function playHomeRunSounds() {
+    playSound('home_run');
+    playSound('home_run_wood');
+    playSound('crowd_cheer');
 }
 
-function updateDiamond(bases) {
-    document.getElementById('base-marker-1').classList.toggle('occupied', !!bases[0]);
-    document.getElementById('base-marker-2').classList.toggle('occupied', !!bases[1]);
-    document.getElementById('base-marker-3').classList.toggle('occupied', !!bases[2]);
+// --- DOM helpers -----------------------------------------------------------
+
+function lineCells(line, numCols, currentInning, isActiveHalf, runsThisHalf) {
+    const cells = [];
+    for (let n = 1; n <= numCols; n++) {
+        if (n <= line.length) cells.push(line[n - 1]);
+        else if (n === currentInning && isActiveHalf) cells.push(runsThisHalf);
+        else cells.push(null);
+    }
+    return cells;
+}
+
+function currentColumnCount() {
+    return document.querySelectorAll('#board-away-row .board-cell').length;
+}
+
+function ensureColumns(n) {
+    const have = currentColumnCount();
+    if (n <= have) return;
+    const headRow = document.getElementById('board-header-row');
+    const awayRow = document.getElementById('board-away-row');
+    const homeRow = document.getElementById('board-home-row');
+    for (let i = have + 1; i <= n; i++) {
+        const th = document.createElement('th');
+        th.textContent = i;
+        headRow.insertBefore(th, headRow.querySelector('.board-total-col'));
+
+        const tdA = document.createElement('td');
+        tdA.className = 'board-cell';
+        tdA.id = `board-away-${i}`;
+        tdA.innerHTML = '<span class="flip-value"></span>';
+        awayRow.insertBefore(tdA, awayRow.querySelector('.board-total-col'));
+
+        const tdH = document.createElement('td');
+        tdH.className = 'board-cell';
+        tdH.id = `board-home-${i}`;
+        tdH.innerHTML = '<span class="flip-value"></span>';
+        homeRow.insertBefore(tdH, homeRow.querySelector('.board-total-col'));
+    }
+}
+
+function setCell(id, value) {
+    const cell = document.getElementById(id);
+    if (!cell) return;
+    const span = cell.querySelector('.flip-value');
+    const text = (value === null || value === '') ? '' : String(value);
+    if (span.textContent === text) return;
+    span.classList.remove('flipping');
+    void span.offsetWidth;  // restart animation
+    span.textContent = text;
+    span.classList.add('flipping');
+}
+
+function updateOuts(n) {
+    for (let i = 1; i <= 3; i++) {
+        document.getElementById(`out-dot-${i}`).classList.toggle('lit', i <= n);
+    }
+}
+
+function updateBoard(state) {
+    const numCols = Math.max(TOTAL_INN, state.inning, state.away_line.length, state.home_line.length);
+    ensureColumns(numCols);
+
+    const awayCells = lineCells(state.away_line, numCols, state.inning, state.half === 'top', state.runs_this_half);
+    const homeCells = lineCells(state.home_line, numCols, state.inning, state.half === 'bottom', state.runs_this_half);
+    awayCells.forEach((v, i) => setCell(`board-away-${i + 1}`, v));
+    homeCells.forEach((v, i) => setCell(`board-home-${i + 1}`, v));
+
+    document.getElementById('board-away-r').textContent = state.away_score;
+    document.getElementById('board-home-r').textContent = state.home_score;
+    document.getElementById('board-away-h').textContent = state.away_hits;
+    document.getElementById('board-home-h').textContent = state.home_hits;
+
+    document.getElementById('board-away-bat').textContent = state.half === 'top' ? '▶' : '';
+    document.getElementById('board-home-bat').textContent = state.half === 'bottom' ? '▶' : '';
+
+    document.getElementById('board-batter').textContent = state.current_batter;
+    const lineEl = document.getElementById('board-batter-line');
+    if (lineEl) lineEl.textContent = state.batter_line ? `(${state.batter_line})` : '';
+
+    updateOuts(state.outs);
+    updateDiamond(state.bases, RUNNER_ANIM_MS);
+    updatePitching(state);
+}
+
+function staminaColorClass(stamina) {
+    if (stamina <= 25) return 'bg-danger';
+    if (stamina <= 50) return 'bg-warning';
+    return 'bg-success';
+}
+
+function setStaminaBar(id, stamina) {
+    const bar = document.getElementById(id);
+    if (!bar) return;
+    bar.style.width = stamina + '%';
+    bar.classList.remove('bg-success', 'bg-warning', 'bg-danger');
+    bar.classList.add(staminaColorClass(stamina));
+}
+
+function updatePitching(state) {
+    if (state.away_pitcher) {
+        document.getElementById('away-pitcher-name').textContent = state.away_pitcher.name || '—';
+        setStaminaBar('away-pitcher-stamina', state.away_pitcher.stamina);
+    }
+    if (state.home_pitcher) {
+        document.getElementById('home-pitcher-name').textContent = state.home_pitcher.name || '—';
+        setStaminaBar('home-pitcher-stamina', state.home_pitcher.stamina);
+    }
+}
+
+function updateDiamond(bases, delayMs = 0) {
+    const apply = () => {
+        document.getElementById('base-marker-1').classList.toggle('occupied', !!bases[0]);
+        document.getElementById('base-marker-2').classList.toggle('occupied', !!bases[1]);
+        document.getElementById('base-marker-3').classList.toggle('occupied', !!bases[2]);
+    };
+    if (delayMs > 0) setTimeout(apply, delayMs); else apply();
+}
+
+function baseCoord(marker) {
+    const id = (marker === 'home' || marker === 'batter') ? 'home-plate-marker' : `base-marker-${marker}`;
+    const el = document.getElementById(id);
+    return el ? { x: +el.getAttribute('cx'), y: +el.getAttribute('cy') } : null;
+}
+
+function animateRunners(moves) {
+    if (!moves || !moves.length) return;
+    const svg = document.querySelector('#diamond svg');
+    if (!svg) return;
+    moves.forEach((mv) => {
+        const from = baseCoord(mv.from);
+        if (!from) return;
+        const token = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        token.setAttribute('class', 'runner-token');
+        token.setAttribute('cx', from.x);
+        token.setAttribute('cy', from.y);
+        token.setAttribute('r', 5);
+        svg.appendChild(token);
+        requestAnimationFrame(() => {
+            const to = mv.to === 'out' ? from : baseCoord(mv.to);
+            if (to) {
+                token.setAttribute('cx', to.x);
+                token.setAttribute('cy', to.y);
+            }
+            if (mv.to === 'out' || mv.to === 'home') {
+                token.classList.add('runner-token-fade');
+            }
+        });
+        setTimeout(() => token.remove(), RUNNER_ANIM_MS + 350);
+    });
+}
+
+const FIREWORK_COLORS = ['#ffd400', '#ff4d4d', '#4dc3ff', '#7cfc00', '#ffffff', '#ff8fd8'];
+
+function launchFireworks() {
+    const overlay = document.getElementById('fireworks-overlay');
+    if (!overlay) return;
+    for (let burst = 0; burst < 3; burst++) {
+        setTimeout(() => {
+            const originX = 30 + Math.random() * 40;
+            const originY = 15 + Math.random() * 25;
+            for (let i = 0; i < 24; i++) {
+                const angle = (Math.PI * 2 * i) / 24;
+                const dist = 60 + Math.random() * 60;
+                const p = document.createElement('span');
+                p.className = 'firework-particle';
+                p.style.left = originX + '%';
+                p.style.top = originY + '%';
+                p.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+                p.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+                p.style.background = FIREWORK_COLORS[Math.floor(Math.random() * FIREWORK_COLORS.length)];
+                overlay.appendChild(p);
+                setTimeout(() => p.remove(), 950);
+            }
+        }, burst * 300);
+    }
+}
+
+function pulseCrowd() {
+    const frame = document.getElementById('crowd-frame');
+    if (!frame) return;
+    frame.classList.add('cheering');
+    setTimeout(() => frame.classList.remove('cheering'), 2400);
 }
 
 function methodTag(method) {
     return (method || 'dice') === 'dice' ? '(🎲)' : '(📊)';
+}
+
+function streakyTag(streaky) {
+    return streaky ? ' 🔥' : '';
 }
 
 function showDice(d1, d2, outcome, method) {
@@ -69,7 +248,10 @@ function appendPlay(play) {
     const p = document.createElement('p');
     p.className = 'mb-1';
     const half = play.play_half === 'top' ? 'TOP' : 'BOT';
-    p.textContent = `[${half} ${play.play_inning}] ⚾ [${play.d1}][${play.d2}] — ${play.message} ${methodTag(play.method)}`;
+    let html = `[${half} ${play.play_inning}] ⚾ [${play.d1}][${play.d2}] — ${play.message}`;
+    if (play.commentary) html += `<br><span class="text-muted fst-italic">${play.commentary}</span>`;
+    html += ` ${methodTag(play.method)}${streakyTag(play.streaky)}`;
+    p.innerHTML = html;
     log.prepend(p);
     log.scrollTop = 0;
 }
@@ -178,18 +360,73 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function handlePlay(play) {
     showDice(play.d1, play.d2, play.outcome, play.method);
     appendPlay(play);
-    updateScoreboard(play.state);
+    maybeShowPitchingPrompt(play);
     if (play.stat_update) {
         const cell = document.getElementById('stat-' + play.stat_update.player_id);
         if (cell) cell.textContent = play.stat_update.line;
     }
-    if (play.outcome === 'home_run') playSound('home_run');
+    if (play.half_over && !play.game_over) {
+        updateOuts(3);
+        await sleep(OUT_FLASH_MS);
+    }
+    animateRunners(play.moves);
+    updateBoard(play.state);
+    if (play.outcome === 'home_run') {
+        playHomeRunSounds();
+        launchFireworks();
+        pulseCrowd();
+    } else if (play.outcome === 'single' || play.outcome === 'double' || play.outcome === 'triple') {
+        playSound(play.outcome);
+    } else if (play.outcome === 'strikeout') {
+        playSound('strikeout');
+    }
     const delay = play.outcome === 'home_run' ? 1400 : 900;
     await sleep(delay);
     if (play.half_over && !play.game_over) {
         await sleep(600);
     }
 }
+
+// --- Pitching changes --------------------------------------------------
+
+async function postPitcherAction(body) {
+    const resp = await fetch(CHANGE_PITCHER_URL, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    return resp.json();
+}
+
+function maybeShowPitchingPrompt(play) {
+    const pca = play.pitching_change_available;
+    if (!pca) return;
+    // Server-rendered banner/button will pick this up on the next reload for
+    // most modes; this handles the cpu_auto no-reload CPU-batting stretch,
+    // where the fielding (human) side's client won't reload until half_over.
+    const banner = document.createElement('div');
+    banner.className = 'alert alert-warning py-2 px-3 mb-2';
+    banner.innerHTML = `<strong>${pca.pitcher.name}</strong> is tiring (${pca.stamina}% stamina). Change pitchers?`;
+    const btnArea = document.getElementById('btn-area');
+    btnArea.prepend(banner);
+}
+
+document.getElementById('btn-open-pitcher-picker')?.addEventListener('click', () => {
+    const picker = document.getElementById('pitcher-picker');
+    picker.style.display = picker.style.display === 'none' ? '' : 'none';
+});
+
+document.getElementById('btn-dismiss-pitcher-prompt')?.addEventListener('click', async () => {
+    await postPitcherAction({ action: 'dismiss' });
+    location.reload();
+});
+
+document.querySelectorAll('.pitcher-pick-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+        await postPitcherAction({ action: 'change', player_id: parseInt(btn.dataset.playerId, 10) });
+        location.reload();
+    });
+});
 
 // --- Mode: click_all -------------------------------------------------------
 
@@ -302,4 +539,9 @@ if (diamondEl) {
         const bases = rawBases.split(',').map(v => v === 'True' || v === '1' || v === 'true');
         updateDiamond(bases);
     }
+}
+
+const boardEl = document.getElementById('scoreboard-board');
+if (boardEl) {
+    updateOuts(parseInt(boardEl.dataset.outs, 10) || 0);
 }

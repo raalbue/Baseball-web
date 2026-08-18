@@ -15,6 +15,8 @@ TEAM_SLUGS = {
     "Rays": "rays", "Red Sox": "red_sox", "Reds": "reds",
     "Rockies": "rockies", "Royals": "royals", "Tigers": "tigers",
     "Twins": "twins", "White Sox": "white_sox", "Yankees": "yankees",
+    # All-Star pseudo-teams default to Wrigley Field.
+    "AL All-Stars": "cubs", "NL All-Stars": "cubs",
 }
 
 

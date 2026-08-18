@@ -66,7 +66,7 @@ SWING_MENU = {
     "4": ("bunt", "Bunt (advance runners)"),
 }
 
-HIT_BASES = {"single": 1, "double": 2, "triple": 3, "home_run": 4}
+HIT_BASES = {"single": 1, "double": 2, "triple": 3, "home_run": 4, "single_error": 1}
 
 # 2d6 dice table: keyed on (min_die, max_die) so (3,5) and (5,3) are the same roll.
 # Doubles each appear 1/36; mixed pairs each appear 2/36.
@@ -98,6 +98,16 @@ DICE_TABLE = {
     (5, 6): "double",
 }
 
+# Streaky-batter variant of the dice table: 2 of the 3 groundout rolls become
+# "reaches on an error" singles (still an at-bat, not a hit) when the current
+# batter is that half-inning's/game's streaky pick. (1,5) stays a groundout so
+# streaky dice-table batters still have some groundout risk.
+DICE_TABLE_STREAKY = {
+    **DICE_TABLE,
+    (2, 4): "single_error",
+    (2, 6): "single_error",
+}
+
 DICE_EVENT_LABELS = {
     "home_run":  "HOME RUN",
     "triple":    "TRIPLE",
@@ -118,6 +128,97 @@ STAT_BASED_MIN_AB = 200
 # (Retrosheet b_sh/b_sf were never loaded); split each batter's leftover
 # in-play outs by this fixed ratio instead.
 STAT_OUT_SPLIT = {"groundout": 0.55, "flyout": 0.43, "sacrifice": 0.02}
+
+# --- Weather -------------------------------------------------------------------
+# Neutral baseline: a 70F, calm, overcast day. Games left at this exact
+# weather must behave identically to before weather existed.
+WEATHER_DEFAULT = {"temperature_f": 70, "wind": "calm", "sky": "overcast"}
+COLD_THRESHOLD_F = 60        # below this, cold-weather hit penalty applies
+WIND_OUT_HR_MULT = 1.3       # blowing out: home runs more likely
+WIND_IN_HR_MULT = 0.75       # blowing in: home runs less likely
+COLD_RAIN_HIT_MULT = 0.9     # rain, or temperature below COLD_THRESHOLD_F: hits less likely
+
+# --- Pitcher stamina -------------------------------------------------------------
+PITCHER_STAMINA_MAX = 100
+STAMINA_DRAIN_PER_BATTER = 4   # -> ~25 batters faced before a pitcher is fully spent
+FATIGUE_WALK_MULT = 0.5        # at zero stamina, walk weight is *1.5
+FATIGUE_HIT_MULT = 0.4         # at zero stamina, single/double/triple/home_run weights are *1.4
+PITCHER_CHANGE_THRESHOLD = 30  # stamina at/below this triggers the change-pitcher prompt
+
+# --- Announcer commentary -----------------------------------------------------
+# A second, randomized flavor line shown alongside the mechanical play message.
+COMMENTARY_LINES = {
+    "home_run": [
+        "Get up, get up, get outta here! {batter} goes deep!",
+        "Absolutely crushed — {batter} sends one a long way!",
+        "That ball is gone — {batter} with the moonshot!",
+        "{batter} takes a well-earned curtain call!",
+        "No doubt about that one off the bat of {batter}!",
+    ],
+    "triple": [
+        "{batter} legs it out for a stand-up triple!",
+        "Into the gap and {batter} is rolling — triple!",
+        "Off the wall and {batter} cruises into third!",
+        "{batter} never stops running — three-bagger!",
+        "{batter} makes that look easy — triple!",
+    ],
+    "double": [
+        "{batter} rips one into the corner for a double!",
+        "Line drive into the gap — {batter} stands on second!",
+        "Base hit, and {batter} stretches it into two!",
+        "That's got extra bases written all over it, {batter} doubles!",
+        "{batter} carves out a two-bagger!",
+    ],
+    "single": [
+        "{batter} slaps one through the infield for a base hit!",
+        "Clean single up the middle for {batter}!",
+        "{batter} finds a hole for a base hit!",
+        "{batter} pokes one the other way for a single!",
+        "Ground ball finds the outfield grass — single for {batter}!",
+    ],
+    "walk": [
+        "{batter} works the count and draws a walk!",
+        "Ball four — {batter} takes the free pass!",
+        "Patient at-bat there, {batter} strolls to first!",
+        "{batter} wasn't giving in — walk!",
+        "Four wide ones, {batter} jogs down to first!",
+    ],
+    "strikeout": [
+        "{batter} is caught looking — strike three!",
+        "Swing and a miss — {batter} strikes out!",
+        "{batter} couldn't catch up to that one!",
+        "Down goes {batter} on strikes!",
+        "{batter} fans — back to the dugout!",
+    ],
+    "groundout": [
+        "{batter} beats it into the dirt — routine groundout.",
+        "Chopper to the infield, {batter} is out at first.",
+        "{batter} rolls one over — can't beat the throw.",
+        "Ground ball, {batter} hustles but comes up short.",
+        "Easy play on that grounder from {batter}.",
+    ],
+    "flyout": [
+        "{batter} skies one — caught in the outfield.",
+        "Lazy fly ball, {batter} is retired.",
+        "{batter} gets under it — routine out.",
+        "Deep, but not deep enough — {batter} flies out.",
+        "{batter} pops it up, easy out.",
+    ],
+    "sacrifice": [
+        "{batter} gives himself up to move the runner along.",
+        "Smart at-bat — {batter} sacrifices for the team.",
+        "{batter} puts the ball in play just to advance the runner.",
+        "That's a professional at-bat from {batter}.",
+        "{batter} trades an out to push the runner up a base.",
+    ],
+    "single_error": [
+        "{batter} reaches on a wild throw — error on the play!",
+        "The defense boots it — {batter} is aboard on the error!",
+        "{batter} beats it out after a bobble in the infield!",
+        "Miscue on defense lets {batter} reach base!",
+        "{batter} reaches after the defense couldn't handle it!",
+    ],
+}
 
 # --- Sound effects (reuse mytimer's wav library) -----------------------------
 SOUND_MAP = {

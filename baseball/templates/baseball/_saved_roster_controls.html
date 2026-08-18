@@ -1,0 +1,65 @@
+{% if team_chosen %}
+<div class="mb-3" style="max-width:500px">
+    <label class="form-label small fw-semibold d-block">Saved Rosters</label>
+    {% if saved_rosters %}
+    <select id="id_load_roster" class="form-select form-select-sm mb-2">
+        <option value="">— load a saved roster —</option>
+        {% for r in saved_rosters %}
+        <option value="{{ r.pk }}" {% if loaded_roster and loaded_roster.pk == r.pk %}selected{% endif %}>{{ r.name }}</option>
+        {% endfor %}
+    </select>
+    {% else %}
+    <p class="text-muted small mb-2">No saved rosters yet for this team.</p>
+    {% endif %}
+
+    {% if roster_save_error %}<div class="text-danger small mb-1">{{ roster_save_error }}</div>{% endif %}
+    {% if roster_saved_name %}<div class="text-success small mb-1">Saved &ldquo;{{ roster_saved_name }}&rdquo;.</div>{% endif %}
+
+    <div class="d-flex align-items-center gap-2">
+        <input type="text" name="roster_name" id="id_roster_name" class="form-control form-control-sm"
+               placeholder="Name this roster" style="max-width:220px"
+               value="{{ roster_saved_name|default:'' }}">
+        <button type="button" id="btn-save-roster" class="btn btn-sm btn-outline-primary">Save roster</button>
+        {% if loaded_roster %}
+        <button type="button" id="btn-delete-roster" class="btn btn-sm btn-outline-danger"
+                data-roster-id="{{ loaded_roster.pk }}">Delete &ldquo;{{ loaded_roster.name }}&rdquo;</button>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+(function () {
+    const form = document.getElementById('side-form');
+    const actionField = document.getElementById('id_action');
+    const savedIdField = document.getElementById('id_saved_roster_id');
+
+    const loadSelect = document.getElementById('id_load_roster');
+    if (loadSelect) {
+        loadSelect.addEventListener('change', () => {
+            if (!loadSelect.value) return;
+            actionField.value = 'load_roster';
+            savedIdField.value = loadSelect.value;
+            form.submit();
+        });
+    }
+
+    const saveBtn = document.getElementById('btn-save-roster');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+            actionField.value = 'save_roster';
+            savedIdField.value = '';
+            form.submit();
+        });
+    }
+
+    const deleteBtn = document.getElementById('btn-delete-roster');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', () => {
+            actionField.value = 'delete_roster';
+            savedIdField.value = deleteBtn.dataset.rosterId;
+            form.submit();
+        });
+    }
+})();
+</script>
+{% endif %}

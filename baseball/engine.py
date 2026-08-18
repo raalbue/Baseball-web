@@ -4,15 +4,33 @@ import random
 from typing import Dict, List, Tuple
 from .params import (
     LINEUP, STRIKE_PROB, FOUL_PROB, DOUBLE_PLAY_PROB,
-    CONTACT_PROB, OUTCOME_WEIGHTS, HIT_BASES, DICE_TABLE, STAT_OUT_SPLIT,
+    CONTACT_PROB, OUTCOME_WEIGHTS, HIT_BASES, DICE_TABLE, DICE_TABLE_STREAKY,
+    STAT_OUT_SPLIT, WEATHER_DEFAULT, COLD_THRESHOLD_F,
+    WIND_OUT_HR_MULT, WIND_IN_HR_MULT, COLD_RAIN_HIT_MULT,
+    PITCHER_STAMINA_MAX, FATIGUE_WALK_MULT, FATIGUE_HIT_MULT,
 )
+
+
+def _fresh_pitching(starting_pitcher, bullpen):
+    """A fresh pitching-staff state dict for one side."""
+    return {
+        "current": dict(starting_pitcher) if starting_pitcher else None,
+        "stamina": PITCHER_STAMINA_MAX,
+        "bullpen": [dict(p) for p in (bullpen or [])],
+        "prompted": False,
+        "dismissed": False,
+    }
 
 
 class GameState:
     """Holds the full mutable state of a ball game."""
 
     def __init__(self, away_name: str, home_name: str, total_innings: int,
-                 away_lineup=None, home_lineup=None) -> None:
+                 away_lineup=None, home_lineup=None,
+                 streaky_per_game: bool = False, streaky_per_inning: bool = False,
+                 weather: dict = None,
+                 away_starting_pitcher: dict = None, home_starting_pitcher: dict = None,
+                 away_bullpen=None, home_bullpen=None) -> None:
         self.away_name = away_name
         self.home_name = home_name
         self.total_innings = total_innings
@@ -26,9 +44,28 @@ class GameState:
         self.bases = [False, False, False]   # 1B, 2B, 3B
         self.away_score = 0
         self.home_score = 0
+        self.away_line = []          # completed runs-per-inning, away
+        self.home_line = []          # completed runs-per-inning, home
+        self.runs_this_half = 0      # running total for the half in progress
+        self.away_hits = 0
+        self.home_hits = 0
         self.away_idx = 0            # lineup rotation index
         self.home_idx = 0
         self.game_over = False
+        self.last_moves = []   # transient: origin/destination of runners moved by the most recent event
+        self.streaky_per_game = streaky_per_game
+        self.streaky_per_inning = streaky_per_inning
+        self.streaky_game_away = (random.choice(self.away_lineup)
+                                   if streaky_per_game and self.away_lineup else None)
+        self.streaky_game_home = (random.choice(self.home_lineup)
+                                   if streaky_per_game and self.home_lineup else None)
+        self.streaky_inning_away = None
+        self.streaky_inning_home = None
+        if streaky_per_inning:
+            self.reroll_inning_streaky()
+        self.weather = dict(weather) if weather else dict(WEATHER_DEFAULT)
+        self.away_pitching = _fresh_pitching(away_starting_pitcher, away_bullpen)
+        self.home_pitching = _fresh_pitching(home_starting_pitcher, home_bullpen)
 
     # -- convenience -----------------------------------------------------------
     @property
@@ -52,6 +89,7 @@ class GameState:
             self.away_score += runs
         else:
             self.home_score += runs
+        self.runs_this_half += runs
 
     def reset_half(self) -> None:
         self.outs = 0
@@ -62,8 +100,37 @@ class GameState:
         self.balls = 0
         self.strikes = 0
 
+    def add_hit(self) -> None:
+        if self.half == "top":
+            self.away_hits += 1
+        else:
+            self.home_hits += 1
+
+    def close_half(self) -> None:
+        """Append the just-finished half's run total to that team's line score
+        and reset the running counter. Must be called once per half, using the
+        *current* self.half value, before flipping to the next half."""
+        line = self.away_line if self.half == "top" else self.home_line
+        line.append(self.runs_this_half)
+        self.runs_this_half = 0
+
     def runners_on(self) -> int:
         return sum(self.bases)
+
+    def reroll_inning_streaky(self) -> None:
+        """Pick a fresh random per-inning streaky batter for the side now batting."""
+        if not self.streaky_per_inning:
+            return
+        if self.half == "top":
+            self.streaky_inning_away = random.choice(self.away_lineup) if self.away_lineup else None
+        else:
+            self.streaky_inning_home = random.choice(self.home_lineup) if self.home_lineup else None
+
+    def is_streaky(self, batter_name: str) -> bool:
+        """True if `batter_name` is the active streaky pick (per-game or per-inning) for the side now batting."""
+        if self.half == "top":
+            return batter_name in (self.streaky_game_away, self.streaky_inning_away)
+        return batter_name in (self.streaky_game_home, self.streaky_inning_home)
 
 
 def weighted_choice(weights: Dict[str, int]) -> str:
@@ -72,39 +139,64 @@ def weighted_choice(weights: Dict[str, int]) -> str:
     return random.choices(population, weights=[weights[k] for k in population])[0]
 
 
-def advance_runners(bases: List[bool], n: int) -> Tuple[List[bool], int]:
+def advance_runners(bases: List[bool], n: int) -> Tuple[List[bool], int, List[Dict[str, object]]]:
     """
     Advance all runners (and the batter) by ``n`` bases on a clean hit.
-
-    :param bases: current [1B, 2B, 3B] occupancy
-    :param n: number of bases for the hit (1=single .. 4=home run)
+    Returns (new_bases, runs, moves) where each move is
+    {"from": "batter"|1|2|3, "to": "home"|1|2|3}.
     """
     positions = [i + 1 for i in range(3) if bases[i]]
     positions.append(0)  # the batter, starting at home plate
     runs = 0
     new_bases = [False, False, False]
+    moves = []
     for pos in positions:
+        origin = "batter" if pos == 0 else pos
         dest = pos + n
         if dest >= 4:
             runs += 1
+            moves.append({"from": origin, "to": "home"})
         else:
             new_bases[dest - 1] = True
-    return new_bases, runs
+            moves.append({"from": origin, "to": dest})
+    return new_bases, runs, moves
 
 
-def walk_runners(bases: List[bool]) -> Tuple[List[bool], int]:
-    """Force-advance runners on a walk; returns (new_bases, runs)."""
+def walk_runners(bases: List[bool]) -> Tuple[List[bool], int, List[Dict[str, object]]]:
+    """Force-advance runners on a walk; returns (new_bases, runs, moves)."""
     new = bases[:]
     runs = 0
     if not new[0]:
         new[0] = True
+        moves = [{"from": "batter", "to": 1}]
     elif not new[1]:
         new[1] = True
+        moves = [{"from": 1, "to": 2}, {"from": "batter", "to": 1}]
     elif not new[2]:
         new[2] = True
+        moves = [{"from": 2, "to": 3}, {"from": 1, "to": 2}, {"from": "batter", "to": 1}]
     else:
         runs = 1  # bases loaded: runner forced home, bases stay loaded
-    return new, runs
+        moves = [{"from": 3, "to": "home"}, {"from": 2, "to": 3},
+                 {"from": 1, "to": 2}, {"from": "batter", "to": 1}]
+    return new, runs, moves
+
+
+def _shift_runners_one(bases: List[bool]) -> Tuple[List[bool], int, List[Dict[str, object]]]:
+    """Advance any existing runners one base each (sacrifice-style); batter doesn't move."""
+    new = [False, False, False]
+    runs = 0
+    moves = []
+    if bases[2]:
+        runs += 1
+        moves.append({"from": 3, "to": "home"})
+    if bases[1]:
+        new[2] = True
+        moves.append({"from": 2, "to": 3})
+    if bases[0]:
+        new[1] = True
+        moves.append({"from": 1, "to": 2})
+    return new, runs, moves
 
 
 def pitch_in_zone(strike_prob: float = STRIKE_PROB) -> bool:
@@ -138,7 +230,8 @@ def apply_ball(state: GameState) -> Tuple[str, bool]:
     """Add a ball; returns (message, at_bat_over)."""
     state.balls += 1
     if state.balls >= 4:
-        state.bases, runs = walk_runners(state.bases)
+        state.bases, runs, moves = walk_runners(state.bases)
+        state.last_moves = moves
         state.add_runs(runs)
         msg = "Ball four! {batter} walks.".format(batter=state.current_batter)
         if runs:
@@ -171,12 +264,13 @@ def apply_in_play(state: GameState, outcome: str) -> Tuple[str, bool]:
     batter = state.current_batter
     if outcome in HIT_BASES:
         n = HIT_BASES[outcome]
-        state.bases, runs = advance_runners(state.bases, n)
+        state.bases, runs, moves = advance_runners(state.bases, n)
+        state.last_moves = moves
         state.add_runs(runs)
+        state.add_hit()
         names = {1: "singles", 2: "doubles", 3: "triples", 4: "homers"}
         msg = "{batter} {verb}!".format(batter=batter, verb=names[n])
         if outcome == "home_run":
-            extra = state.runners_on()  # runners already cleared; recount via runs
             msg = "{batter} crushes a {runs}-run HOME RUN!".format(
                 batter=batter, runs=runs) if runs > 1 else \
                 "{batter} goes deep, SOLO HOME RUN!".format(batter=batter)
@@ -189,6 +283,7 @@ def apply_in_play(state: GameState, outcome: str) -> Tuple[str, bool]:
         if state.bases[0] and state.outs < 2 and random.random() < DOUBLE_PLAY_PROB:
             state.outs += 2
             state.bases[0] = False
+            state.last_moves = [{"from": 1, "to": "out"}]
             return "{batter} grounds into a double play!".format(batter=batter), True
         state.outs += 1
         return "{batter} grounds out.".format(batter=batter), True
@@ -198,6 +293,7 @@ def apply_in_play(state: GameState, outcome: str) -> Tuple[str, bool]:
         if state.bases[2] and state.outs < 2:
             state.bases[2] = False
             state.add_runs(1)
+            state.last_moves = [{"from": 3, "to": "home"}]
             scored = True
         state.outs += 1
         if scored:
@@ -213,7 +309,8 @@ def apply_bunt(state: GameState) -> Tuple[str, bool]:
     batter = state.current_batter
     # 25% beats it out for a single, otherwise a sacrifice that advances runners.
     if random.random() < 0.25:
-        state.bases, runs = advance_runners(state.bases, 1)
+        state.bases, runs, moves = advance_runners(state.bases, 1)
+        state.last_moves = moves
         state.add_runs(runs)
         msg = "{batter} drops a bunt single!".format(batter=batter)
         if runs:
@@ -221,15 +318,8 @@ def apply_bunt(state: GameState) -> Tuple[str, bool]:
         return msg, True
     runs = 0
     if any(state.bases):
-        # advance lead runners one base (sacrifice).
-        new = [False, False, False]
-        if state.bases[2]:
-            runs += 1
-        if state.bases[1]:
-            new[2] = True
-        if state.bases[0]:
-            new[1] = True
-        state.bases = new
+        state.bases, runs, moves = _shift_runners_one(state.bases)
+        state.last_moves = moves
         state.add_runs(runs)
     state.outs += 1
     msg = "{batter} lays down a sacrifice bunt.".format(batter=batter)
@@ -245,7 +335,8 @@ def roll_dice() -> Tuple[int, int]:
 
 def apply_walk(state: GameState) -> Tuple[str, bool]:
     """Award a direct walk (no count update)."""
-    state.bases, runs = walk_runners(state.bases)
+    state.bases, runs, moves = walk_runners(state.bases)
+    state.last_moves = moves
     state.add_runs(runs)
     msg = "{batter} draws a walk.".format(batter=state.current_batter)
     if runs:
@@ -264,14 +355,8 @@ def apply_sacrifice(state: GameState) -> Tuple[str, bool]:
     batter = state.current_batter
     runs = 0
     if any(state.bases):
-        new = [False, False, False]
-        if state.bases[2]:
-            runs += 1
-        if state.bases[1]:
-            new[2] = True
-        if state.bases[0]:
-            new[1] = True
-        state.bases = new
+        state.bases, runs, moves = _shift_runners_one(state.bases)
+        state.last_moves = moves
         state.add_runs(runs)
     state.outs += 1
     msg = "{batter} hits a sacrifice.".format(batter=batter)
@@ -302,18 +387,72 @@ def stat_based_weights(row: Dict[str, int]) -> Dict[str, int]:
     }
 
 
-def resolve_dice_roll(state: GameState, stat_weights: Dict[str, int] = None) -> Tuple[int, int, str, str]:
-    """Roll 2d6 (always, for display), then either look up DICE_TABLE by the
-    die pair or -- when stat_weights is given -- draw the outcome from the
-    batter's own career-stat weights. Applies the event to state.
+def dice_table_weights(streaky: bool = False) -> Dict[str, int]:
+    """{outcome: combo_count} derived from the live DICE_TABLE(_STREAKY) contents
+    (always sums to 36, matching each key's true raw-dice-combo count: a
+    doubles key like (3,3) is 1/36, a mixed-pair key like (2,5) is 2/36),
+    so it can never drift out of sync with the table."""
+    table = DICE_TABLE_STREAKY if streaky else DICE_TABLE
+    weights: Dict[str, int] = {}
+    for (a, b), outcome in table.items():
+        combo_count = 1 if a == b else 2
+        weights[outcome] = weights.get(outcome, 0) + combo_count
+    return weights
+
+
+def apply_weather(weights: Dict[str, int], weather: Dict) -> Dict[str, int]:
+    """Multiplicatively nudge an outcome-weight dict for game conditions.
+    No-op at WEATHER_DEFAULT (returns `weights` unchanged)."""
+    if weather == WEATHER_DEFAULT:
+        return weights
+    if weather["wind"] == "blowing_out":
+        weights["home_run"] = weights.get("home_run", 0) * WIND_OUT_HR_MULT
+    elif weather["wind"] == "blowing_in":
+        weights["home_run"] = weights.get("home_run", 0) * WIND_IN_HR_MULT
+    if weather["sky"] == "rain" or weather["temperature_f"] < COLD_THRESHOLD_F:
+        for key in ("single", "double", "triple", "home_run"):
+            weights[key] = weights.get(key, 0) * COLD_RAIN_HIT_MULT
+    return weights
+
+
+def apply_fatigue(weights: Dict[str, int], stamina: float) -> Dict[str, int]:
+    """Multiplicatively nudge an outcome-weight dict as a pitcher tires.
+    No-op at PITCHER_STAMINA_MAX (returns `weights` unchanged)."""
+    if stamina >= PITCHER_STAMINA_MAX:
+        return weights
+    fatigue = max(0.0, (PITCHER_STAMINA_MAX - stamina) / PITCHER_STAMINA_MAX)  # 0..1
+    weights["walk"] = weights.get("walk", 0) * (1 + fatigue * FATIGUE_WALK_MULT)
+    for key in ("single", "double", "triple", "home_run"):
+        weights[key] = weights.get(key, 0) * (1 + fatigue * FATIGUE_HIT_MULT)
+    return weights
+
+
+def resolve_dice_roll(state: GameState, stat_weights: Dict[str, int] = None,
+                       streaky: bool = False, weather: Dict = None,
+                       stamina: float = None) -> Tuple[int, int, str, str]:
+    """Roll 2d6 (always, for display), then determine the outcome:
+    - stat_weights given: weighted draw over the batter's career-stat weights
+      (weather and fatigue already applied by the caller).
+    - stat_weights is None, weather is WEATHER_DEFAULT and stamina is full
+      (or both omitted): the exact original dice-table lookup, unchanged.
+    - stat_weights is None, weather non-default and/or stamina not full: a
+      weighted draw over the dice table's own combo-count weights, with
+      weather and fatigue applied.
+    Applies the event to state.
 
     Returns (d1, d2, outcome_key, play_message).
     """
+    weather = weather or WEATHER_DEFAULT
+    stamina = PITCHER_STAMINA_MAX if stamina is None else stamina
     d1, d2 = roll_dice()
     if stat_weights is not None:
         outcome = weighted_choice(stat_weights)
+    elif weather == WEATHER_DEFAULT and stamina >= PITCHER_STAMINA_MAX:
+        table = DICE_TABLE_STREAKY if streaky else DICE_TABLE
+        outcome = table[(min(d1, d2), max(d1, d2))]
     else:
-        outcome = DICE_TABLE[(min(d1, d2), max(d1, d2))]
+        weights = apply_fatigue(apply_weather(dice_table_weights(streaky), weather), stamina)
+        outcome = weighted_choice(weights)
     if outcome == "walk":
         msg, _ = apply_walk(state)
     elif outcome == "strikeout":

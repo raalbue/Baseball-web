@@ -10,6 +10,7 @@ urlpatterns = [
     path("<int:pk>/roll/",     views.RollView.as_view(),       name="baseball-roll"),
     path("<int:pk>/simulate/", views.SimulateView.as_view(),   name="baseball-simulate"),
     path("<int:pk>/replay/",   views.ReplayView.as_view(),     name="baseball-replay"),
+    path("<int:pk>/change-pitcher/", views.PitcherChangeView.as_view(), name="baseball-change-pitcher"),
     path("<int:pk>/waiting/",  views.WaitingView.as_view(),        name="baseball-waiting"),
     path("<int:pk>/join/",     views.Player2JoinView.as_view(),    name="baseball-join"),
     path("<int:pk>/cancel/",   views.CancelWaitingView.as_view(),  name="baseball-cancel"),

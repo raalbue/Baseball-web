@@ -44,7 +44,7 @@ class Team(models.Model):
         ordering = ['name']
 
     def __str__(self):
-        return f"{self.city} {self.name}"
+        return f"{self.city} {self.name}".strip()
 
 
 class Player(models.Model):
@@ -111,10 +111,22 @@ def main_position(player) -> str | None:
     return code
 
 
+def is_all_star_team(team) -> bool:
+    return bool(team) and team.division == "All-Star"
+
+
+def players_for_team(team):
+    """All eligible players for a roster pick: one real team's roster, or
+    every player across the league for an All-Star pseudo-team."""
+    if is_all_star_team(team):
+        return Player.objects.filter(team__conference=team.conference)
+    return Player.objects.filter(team=team)
+
+
 def position_pools(team) -> dict:
     pools = {c: [] for c in FIELDING_COLS}
     pools["DH"] = []
-    for p in Player.objects.filter(team=team):
+    for p in players_for_team(team):
         for code, col in FIELDING_COLS.items():
             if (getattr(p, col) or 0) > 0:
                 pools[code].append(p.player_id)
@@ -252,6 +264,11 @@ class Game(models.Model):
 
     CPU_SIDE_CHOICES = [("away", "Away"), ("home", "Home")]
 
+    WIND_CHOICES = [
+        ("calm", "Calm"), ("blowing_out", "Blowing Out"), ("blowing_in", "Blowing In"),
+    ]
+    SKY_CHOICES = [("overcast", "Overcast"), ("rain", "Rain")]
+
     owner         = models.ForeignKey(settings.AUTH_USER_MODEL,
                                       on_delete=models.CASCADE,
                                       related_name="baseball_games")
@@ -276,6 +293,13 @@ class Game(models.Model):
                                      null=True, blank=True)
     owner_side    = models.CharField(max_length=4, choices=CPU_SIDE_CHOICES,
                                      null=True, blank=True)
+    streaky_per_game   = models.BooleanField(default=False)
+    streaky_per_inning = models.BooleanField(default=False)
+    weather_temperature_f = models.IntegerField(default=70)
+    weather_wind          = models.CharField(max_length=12, choices=WIND_CHOICES, default="calm")
+    weather_sky            = models.CharField(max_length=12, choices=SKY_CHOICES, default="overcast")
+    away_bullpen  = models.JSONField(default=list)
+    home_bullpen  = models.JSONField(default=list)
     state         = models.JSONField()
     play_log      = models.JSONField(default=list)
     status        = models.CharField(max_length=20, choices=STATUS_CHOICES,
@@ -295,16 +319,29 @@ class Game(models.Model):
             "outs": s.outs, "balls": s.balls, "strikes": s.strikes,
             "bases": s.bases,
             "away_score": s.away_score, "home_score": s.home_score,
+            "away_line": s.away_line, "home_line": s.home_line,
+            "runs_this_half": s.runs_this_half,
+            "away_hits": s.away_hits, "home_hits": s.home_hits,
             "away_idx": s.away_idx, "home_idx": s.home_idx,
             "game_over": s.game_over,
             "away_lineup": s.away_lineup, "home_lineup": s.home_lineup,
+            "streaky_per_game": s.streaky_per_game,
+            "streaky_per_inning": s.streaky_per_inning,
+            "streaky_game_away": s.streaky_game_away,
+            "streaky_game_home": s.streaky_game_home,
+            "streaky_inning_away": s.streaky_inning_away,
+            "streaky_inning_home": s.streaky_inning_home,
+            "weather": s.weather,
+            "away_pitching": s.away_pitching,
+            "home_pitching": s.home_pitching,
         }
 
     @staticmethod
     def state_from_dict(d: dict) -> GameState:
         gs = GameState(d["away_name"], d["home_name"], d["total_innings"],
                        away_lineup=d.get("away_lineup"),
-                       home_lineup=d.get("home_lineup"))
+                       home_lineup=d.get("home_lineup"),
+                       weather=d.get("weather"))
         gs.inning      = d["inning"]
         gs.half        = d["half"]
         gs.outs        = d["outs"]
@@ -313,9 +350,22 @@ class Game(models.Model):
         gs.bases       = d["bases"]
         gs.away_score  = d["away_score"]
         gs.home_score  = d["home_score"]
+        gs.away_line      = d.get("away_line", [])
+        gs.home_line      = d.get("home_line", [])
+        gs.runs_this_half = d.get("runs_this_half", 0)
+        gs.away_hits      = d.get("away_hits", 0)
+        gs.home_hits      = d.get("home_hits", 0)
         gs.away_idx    = d["away_idx"]
         gs.home_idx    = d["home_idx"]
         gs.game_over   = d["game_over"]
+        gs.streaky_per_game    = d.get("streaky_per_game", False)
+        gs.streaky_per_inning  = d.get("streaky_per_inning", False)
+        gs.streaky_game_away   = d.get("streaky_game_away")
+        gs.streaky_game_home   = d.get("streaky_game_home")
+        gs.streaky_inning_away = d.get("streaky_inning_away")
+        gs.streaky_inning_home = d.get("streaky_inning_home")
+        gs.away_pitching = d.get("away_pitching") or gs.away_pitching
+        gs.home_pitching = d.get("home_pitching") or gs.home_pitching
         return gs
 
     def load_state(self) -> GameState:
@@ -323,6 +373,26 @@ class Game(models.Model):
 
     def save_state(self, gs: GameState) -> None:
         self.state = self.state_to_dict(gs)
+
+
+class SavedRoster(models.Model):
+    """A user's saved 10-slot roster (position picks + batting order) for a
+    team, so they don't have to re-pick/re-order it on every new game."""
+    owner      = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                   related_name="saved_rosters")
+    team       = models.ForeignKey(Team, on_delete=models.CASCADE,
+                                   related_name="saved_rosters")
+    name       = models.CharField(max_length=50)
+    roster     = models.JSONField()  # same shape as Game.away_roster/home_roster
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["team__name", "name"]
+        unique_together = (("owner", "team", "name"),)
+
+    def __str__(self):
+        return f"{self.name} ({self.team.name})"
 
 
 class GameStat(models.Model):

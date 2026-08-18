@@ -1,0 +1,14 @@
+{% if all_star %}
+<input type="text" class="form-control form-control-sm mb-2 bullpen-search"
+       data-target="{{ field.id_for_label }}-list" placeholder="Search players…">
+{% endif %}
+<div id="{{ field.id_for_label }}-list"
+     style="max-height:220px;overflow-y:auto;border:1px solid #dee2e6;border-radius:.375rem;padding:.5rem">
+    {% for chk in field %}
+    <div class="form-check bullpen-option">
+        {{ chk.tag }}
+        <label class="form-check-label" for="{{ chk.id_for_label }}">{{ chk.choice_label }}</label>
+    </div>
+    {% endfor %}
+</div>
+{% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}
