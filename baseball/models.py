@@ -304,6 +304,10 @@ class Game(models.Model):
     play_log      = models.JSONField(default=list)
     status        = models.CharField(max_length=20, choices=STATUS_CHOICES,
                                      default=ACTIVE)
+    season        = models.ForeignKey('Season', null=True, blank=True,
+                                      on_delete=models.CASCADE,
+                                      related_name='season_games')
+    season_entry_id = models.PositiveIntegerField(null=True, blank=True)
     created_at    = models.DateTimeField(auto_now_add=True)
     updated_at    = models.DateTimeField(auto_now=True)
 
@@ -373,6 +377,42 @@ class Game(models.Model):
 
     def save_state(self, gs: GameState) -> None:
         self.state = self.state_to_dict(gs)
+
+
+class Season(models.Model):
+    """An 8- or 16-team season: a fixed round-robin regular-season schedule of
+    3-game series plus a playoff bracket, owned by one user playing as one team
+    for the whole season."""
+    SIZE_CHOICES = [(8, "8 Teams"), (16, "16 Teams")]
+
+    REGULAR  = "regular"
+    PLAYOFFS = "playoffs"
+    FINISHED = "finished"
+    STAGE_CHOICES = [
+        (REGULAR, "Regular Season"),
+        (PLAYOFFS, "Playoffs"),
+        (FINISHED, "Finished"),
+    ]
+
+    owner          = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                       related_name="baseball_seasons")
+    size           = models.PositiveSmallIntegerField(choices=SIZE_CHOICES)
+    player_team    = models.ForeignKey(Team, on_delete=models.PROTECT, related_name="+")
+    player_roster  = models.JSONField(default=list)   # same shape as Game.away_roster/home_roster
+    player_bullpen = models.JSONField(default=list)   # same shape as Game.away_bullpen/home_bullpen
+    team_ids       = models.JSONField(default=list)   # league membership, len == size
+    schedule       = models.JSONField(default=list)   # flattened ordered game entries
+    bracket        = models.JSONField(default=list)   # playoff round metadata
+    current_index  = models.PositiveIntegerField(default=0)  # pointer into `schedule`
+    stage          = models.CharField(max_length=10, choices=STAGE_CHOICES, default=REGULAR)
+    created_at     = models.DateTimeField(auto_now_add=True)
+    updated_at     = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.player_team.name} — {self.get_size_display()} Season"
 
 
 class SavedRoster(models.Model):

@@ -382,6 +382,18 @@ class Page1View(LoginRequiredMixin, View):
                           {"form": form, "team_chosen": True,
                            "saved_rosters": saved_rosters, "loaded_roster": saved})
 
+        if action == "auto_roster" and team:
+            data = request.POST.copy()
+            picks = auto_fill_roster(team)
+            for code, pid in picks.items():
+                data[code] = str(pid)
+            bullpen = auto_fill_bullpen(team, exclude_player_id=picks.get("P"))
+            data.setlist("bullpen", [str(b["player_id"]) for b in bullpen])
+            form = Page1Form(data, team=team, request_user=request.user)
+            return render(request, self.template_name,
+                          {"form": form, "team_chosen": True,
+                           "saved_rosters": saved_rosters})
+
         if action == "save_roster" and team:
             form = Page1Form(request.POST, team=team, request_user=request.user)
             name = (request.POST.get("roster_name") or "").strip()
@@ -917,7 +929,41 @@ class RollView(LoginRequiredMixin, View):
         if play["game_over"]:
             game.status = Game.FINISHED
         game.save()
+        if game.season_id and play["game_over"]:
+            from .season import advance_season, record_season_game_result
+            record_season_game_result(game)
+            advance_season(game.season)
         return JsonResponse(play)
+
+
+def simulate_full_game(game):
+    """Run `game` to completion via the same at-bat loop as a single manual roll,
+    looped until game-over. Mutates and saves `game`. Returns the list of plays."""
+    gs = game.load_state()
+    plays, totals = [], {}
+    while not gs.game_over:
+        roster = game.away_roster if gs.half == "top" else game.home_roster
+        play = _advance_game(gs, roster)
+        _maybe_auto_swap_pitcher(game, gs, play)
+        pid = _pid_for_name(roster, play["batter"])
+        if pid:
+            acc = totals.setdefault(pid, {})
+            for col, n in _stat_delta(play["outcome"]).items():
+                acc[col] = acc.get(col, 0) + n
+            h = (acc.get("singles", 0) + acc.get("doubles", 0)
+                 + acc.get("triples", 0) + acc.get("home_runs", 0))
+            play["stat_update"] = {"player_id": pid, "line": f"{h}-{acc.get('ab', 0)}"}
+            play["state"]["batter_line"] = play["stat_update"]["line"]
+        plays.append(play)
+        if play["game_over"]:
+            break
+    for pid, cols in totals.items():
+        _apply_delta(game, pid, cols)
+    game.save_state(gs)
+    game.play_log = plays
+    game.status   = Game.FINISHED
+    game.save()
+    return plays
 
 
 class SimulateView(LoginRequiredMixin, View):
@@ -925,30 +971,11 @@ class SimulateView(LoginRequiredMixin, View):
         game = get_object_or_404(Game, pk=pk, owner=request.user)
         if game.status == Game.FINISHED:
             return JsonResponse({"error": "game over"}, status=400)
-        gs    = game.load_state()
-        plays, totals = [], {}
-        while not gs.game_over:
-            roster = game.away_roster if gs.half == "top" else game.home_roster
-            play = _advance_game(gs, roster)
-            _maybe_auto_swap_pitcher(game, gs, play)
-            pid = _pid_for_name(roster, play["batter"])
-            if pid:
-                acc = totals.setdefault(pid, {})
-                for col, n in _stat_delta(play["outcome"]).items():
-                    acc[col] = acc.get(col, 0) + n
-                h = (acc.get("singles", 0) + acc.get("doubles", 0)
-                     + acc.get("triples", 0) + acc.get("home_runs", 0))
-                play["stat_update"] = {"player_id": pid, "line": f"{h}-{acc.get('ab', 0)}"}
-                play["state"]["batter_line"] = play["stat_update"]["line"]
-            plays.append(play)
-            if play["game_over"]:
-                break
-        for pid, cols in totals.items():
-            _apply_delta(game, pid, cols)
-        game.save_state(gs)
-        game.play_log = plays
-        game.status   = Game.FINISHED
-        game.save()
+        plays = simulate_full_game(game)
+        if game.season_id:
+            from .season import advance_season, record_season_game_result
+            record_season_game_result(game)
+            advance_season(game.season)
         return JsonResponse({"plays": plays})
 
 
@@ -957,6 +984,8 @@ class ReplayView(LoginRequiredMixin, View):
         game = get_object_or_404(Game, pk=pk, owner=request.user)
         if game.mode == Game.MULTIPLAYER:
             return JsonResponse({"error": "replay not supported for multiplayer games"}, status=400)
+        if game.season_id:
+            return JsonResponse({"error": "replay not supported for season games"}, status=400)
         try:
             body = json.loads(request.body or b"{}")
         except json.JSONDecodeError:

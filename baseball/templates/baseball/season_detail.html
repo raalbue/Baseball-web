@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-1">
+    <h2>{{ season.player_team.name }} — {{ season.get_size_display }} Season</h2>
+    <a href="{% url 'season-list' %}" class="btn btn-link">Back to Seasons</a>
+</div>
+<p class="text-muted">{{ season.get_stage_display }}</p>
+
+<h4>Standings</h4>
+<div style="overflow-x:auto">
+<table class="table table-sm table-hover align-middle">
+    <thead class="table-dark">
+        <tr>
+            <th>Team</th><th>W</th><th>L</th><th>Win%</th>
+            <th>RS/9</th><th>RA/9</th><th>ERA</th><th>AVG</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for row in standings %}
+    <tr{% if row.team.team_id == season.player_team_id %} class="table-primary"{% endif %}>
+        <td>{{ row.team.name }}</td>
+        <td>{{ row.wins }}</td>
+        <td>{{ row.losses }}</td>
+        <td>{{ row.win_pct|floatformat:3 }}</td>
+        <td>{{ row.runs_for_per9|floatformat:2 }}</td>
+        <td>{{ row.runs_against_per9|floatformat:2 }}</td>
+        <td>{{ row.era|floatformat:2 }}</td>
+        <td>{{ row.avg|floatformat:3 }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<div class="my-4">
+{% if season.stage == "finished" %}
+<div class="alert alert-success fw-bold fs-5 mb-0">
+    🏆 Champion: {{ champion.name|default:"?" }}
+</div>
+{% elif next_entry %}
+<button id="btn-advance" class="btn btn-success btn-lg"
+        data-url="{% url 'season-advance' season.pk %}">
+    Play Next Game
+</button>
+<p class="text-muted small mt-1">
+    Next up: {{ next_entry.away_team_name }} @ {{ next_entry.home_team_name }}
+    — {{ next_entry.date }} {{ next_entry.time }}
+</p>
+{% endif %}
+</div>
+
+{% if bracket %}
+<h4>Playoffs</h4>
+<div class="mb-4">
+{% for round in bracket %}
+<div class="mb-2">
+    <strong>{{ round.round|title }}</strong>
+    {% if round.team_name %}
+    <span class="ms-2">{{ round.team_name }}</span>
+    {% else %}
+    <span class="ms-2 text-muted">{{ round.seed_names|join:", " }}</span>
+    {% endif %}
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+<h4>Schedule</h4>
+<div style="max-height:50vh;overflow-y:auto">
+{% for games in series_list %}
+<div class="mb-2 pb-2 border-bottom">
+    <strong>{{ games.0.away_team_name }} @ {{ games.0.home_team_name }}</strong>
+    <span class="text-muted small">({{ games.0.round|title }})</span>
+    <ul class="list-unstyled small mb-0">
+    {% for g in games %}
+        <li>
+            {{ g.date }} {{ g.time }} — Game {{ g.game_number }}:
+            {% if g.status == "final" %}
+                {{ g.away_score }}-{{ g.home_score }} Final
+            {% elif g.status == "skipped" %}
+                <span class="text-muted">— (series decided)</span>
+            {% elif g.status == "in_progress" %}
+                <span class="text-warning">In Progress</span>
+            {% else %}
+                Scheduled
+            {% endif %}
+        </li>
+    {% endfor %}
+    </ul>
+</div>
+{% endfor %}
+</div>
+
+<form id="csrf-form" style="display:none">{% csrf_token %}</form>
+<script>
+const btn = document.getElementById('btn-advance');
+if (btn) {
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Working…';
+        const resp = await fetch(btn.dataset.url, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': document.querySelector('#csrf-form [name=csrfmiddlewaretoken]').value,
+            },
+        });
+        const data = await resp.json();
+        if (data.redirect_url) {
+            location.href = data.redirect_url;
+        } else {
+            location.reload();
+        }
+    });
+}
+</script>
+{% endblock %}

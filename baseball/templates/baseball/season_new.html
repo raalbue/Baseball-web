@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>New Game — Player 1</h2>
+<h2>New Season</h2>
 <form method="post" class="mt-3" id="side-form">
     {% csrf_token %}
-    <input type="hidden" name="action" id="id_action" value="next">
+    <input type="hidden" name="action" id="id_action" value="create">
     <input type="hidden" name="saved_roster_id" id="id_saved_roster_id" value="">
 
     {% if form.non_field_errors %}
@@ -11,8 +11,8 @@
     {% endif %}
 
     <div class="mb-3">
-        <label class="form-label fw-semibold d-block">You are</label>
-        {% for radio in form.side %}
+        <label class="form-label fw-semibold d-block">League Size</label>
+        {% for radio in form.size %}
         <div class="form-check form-check-inline">
             {{ radio.tag }}
             <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
@@ -27,69 +27,6 @@
     </div>
 
     {% include "baseball/_saved_roster_controls.html" %}
-
-    <div class="mb-3" style="max-width:400px">
-        <label class="form-label fw-semibold">Innings</label>
-        {% for radio in form.total_innings %}
-        <div class="form-check form-check-inline">
-            {{ radio.tag }}
-            <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
-        </div>
-        {% endfor %}
-    </div>
-
-    <div class="mb-3">
-        <label class="form-label fw-semibold d-block">Streaky Player</label>
-        <div class="form-check">
-            {{ form.streaky_per_game }}
-            <label class="form-check-label" for="{{ form.streaky_per_game.id_for_label }}">Per game</label>
-        </div>
-        <div class="form-check">
-            {{ form.streaky_per_inning }}
-            <label class="form-check-label" for="{{ form.streaky_per_inning.id_for_label }}">Per inning</label>
-        </div>
-    </div>
-
-    <div class="mb-3">
-        <label class="form-label fw-semibold d-block">Weather</label>
-        <div class="d-flex gap-3 flex-wrap align-items-end">
-            <div>
-                <label class="form-label small mb-1" for="{{ form.weather_temperature_f.id_for_label }}">Temp (&deg;F)</label>
-                {{ form.weather_temperature_f }}
-            </div>
-            <div>
-                <label class="form-label small mb-1" for="{{ form.weather_wind.id_for_label }}">Wind</label>
-                {{ form.weather_wind }}
-            </div>
-            <div>
-                <label class="form-label small mb-1" for="{{ form.weather_sky.id_for_label }}">Sky</label>
-                {{ form.weather_sky }}
-            </div>
-        </div>
-    </div>
-
-    <div class="mb-3">
-        <label class="form-label fw-semibold d-block">Mode</label>
-        {% for radio in form.mode %}
-        <div class="form-check">
-            {{ radio.tag }}
-            <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
-        </div>
-        {% endfor %}
-        {% if form.mode.errors %}<div class="text-danger small">{{ form.mode.errors }}</div>{% endif %}
-    </div>
-
-    <div id="opponent-team-wrap" class="mb-3" style="max-width:400px;display:none">
-        <label class="form-label fw-semibold">Opponent Team (CPU)</label>
-        {{ form.opponent_team }}
-        {% if form.opponent_team.errors %}<div class="text-danger small">{{ form.opponent_team.errors }}</div>{% endif %}
-    </div>
-
-    <div id="opponent-user-wrap" class="mb-3" style="max-width:400px;display:none">
-        <label class="form-label fw-semibold">Opponent Player</label>
-        {{ form.opponent_user }}
-        {% if form.opponent_user.errors %}<div class="text-danger small">{{ form.opponent_user.errors }}</div>{% endif %}
-    </div>
 
     {% if team_chosen %}
     <hr>
@@ -136,8 +73,8 @@
     {% endif %}
 
     <div class="mt-4">
-        <button type="submit" id="next-btn" class="btn btn-success">Next</button>
-        <a href="{% url 'baseball-list' %}" class="btn btn-link">Cancel</a>
+        <button type="submit" id="next-btn" class="btn btn-success">Start Season</button>
+        <a href="{% url 'season-list' %}" class="btn btn-link">Cancel</a>
     </div>
 </form>
 
@@ -155,16 +92,6 @@ if (autoRosterBtn) {
         document.getElementById('side-form').submit();
     });
 }
-
-function syncModeUI() {
-    const checked = document.querySelector('input[name="mode"]:checked');
-    const mode = checked ? checked.value : '';
-    document.getElementById('opponent-team-wrap').style.display = mode === 'cpu_auto' ? '' : 'none';
-    document.getElementById('opponent-user-wrap').style.display = mode === 'multiplayer' ? '' : 'none';
-    document.getElementById('next-btn').textContent = mode === 'cpu_auto' ? 'Play Ball!' : 'Next';
-}
-document.querySelectorAll('input[name="mode"]').forEach(r => r.addEventListener('change', syncModeUI));
-syncModeUI();
 
 const battingList = document.getElementById('batting-list');
 if (battingList) {

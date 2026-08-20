@@ -1,6 +1,6 @@
 from django import forms
 from django.contrib.auth import get_user_model
-from .models import Game, Team, Player, position_pools, is_all_star_team
+from .models import Game, Season, Team, Player, position_pools, is_all_star_team
 
 POSITIONS = [
     ("P",  "Pitcher"),
@@ -185,3 +185,15 @@ class Page1Form(SideRosterForm):
         if mode == Game.MULTIPLAYER and not cleaned.get("opponent_user"):
             self.add_error("opponent_user", "Pick an opponent to invite.")
         return cleaned
+
+
+class SeasonCreateForm(SideRosterForm):
+    """New season: league size + team pick + 10-slot roster + bullpen."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("team_queryset", Team.objects.exclude(division="All-Star"))
+        super().__init__(*args, **kwargs)
+        self.fields["size"] = forms.TypedChoiceField(
+            choices=Season.SIZE_CHOICES, coerce=int, initial=8,
+            widget=forms.RadioSelect,
+        )

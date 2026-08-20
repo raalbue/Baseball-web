@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views
+from . import season_views, views
 
 urlpatterns = [
     path("",                   views.GameListView.as_view(),   name="baseball-list"),
@@ -14,4 +14,10 @@ urlpatterns = [
     path("<int:pk>/waiting/",  views.WaitingView.as_view(),        name="baseball-waiting"),
     path("<int:pk>/join/",     views.Player2JoinView.as_view(),    name="baseball-join"),
     path("<int:pk>/cancel/",   views.CancelWaitingView.as_view(),  name="baseball-cancel"),
+
+    path("season/",                  season_views.SeasonListView.as_view(),    name="season-list"),
+    path("season/new/",              season_views.SeasonCreateView.as_view(),  name="season-new"),
+    path("season/<int:pk>/",         season_views.SeasonDetailView.as_view(),  name="season-detail"),
+    path("season/<int:pk>/advance/", season_views.SeasonAdvanceView.as_view(), name="season-advance"),
+    path("season/<int:pk>/delete/",  season_views.SeasonDeleteView.as_view(),  name="season-delete"),
 ]

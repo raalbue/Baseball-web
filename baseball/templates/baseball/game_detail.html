@@ -109,6 +109,8 @@
 const GAME_MODE   = "{{ game.mode }}";
 const GAME_STATUS = "{{ game.status }}";
 const CPU_SIDE    = "{{ game.cpu_side|default:'' }}";
+const SEASON_ID   = {{ game.season_id|default_if_none:"null" }};
+const SEASON_URL  = "{% if game.season_id %}{% url 'season-detail' game.season_id %}{% endif %}";
 const MY_SIDE        = "{{ my_side|default:'' }}";
 const OPPONENT_NAME  = "{{ opponent_username|default:'opponent' }}";
 const ROLL_URL    = "{% url 'baseball-roll' game.pk %}";
@@ -281,7 +283,13 @@ const TOTAL_INN   = {{ game.total_innings }};
         <a href="{% url 'baseball-list' %}" class="btn btn-outline-success btn-sm mt-2">
           Back to games
         </a>
-        {% if game.mode != "multiplayer" %}
+        {% if game.season_id %}
+        <div class="mt-2">
+          <a href="{% url 'season-detail' game.season_id %}" class="btn btn-outline-primary btn-sm">
+            Continue Season
+          </a>
+        </div>
+        {% elif game.mode != "multiplayer" %}
         <div class="mt-2 d-flex align-items-center gap-2">
           <button type="button" id="btn-replay" class="btn btn-outline-primary btn-sm">
             🔁 Replay

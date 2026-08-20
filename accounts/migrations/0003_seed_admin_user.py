@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db import migrations
+from django.utils import timezone
 
 
 def seed_admin(apps, schema_editor):
@@ -8,7 +9,8 @@ def seed_admin(apps, schema_editor):
 
     user, created = User.objects.get_or_create(
         username="Admin",
-        defaults={"is_staff": True, "is_superuser": True, "is_active": True},
+        defaults={"is_staff": True, "is_superuser": True, "is_active": True,
+                   "last_login": timezone.now()},
     )
     user.set_password("Admin")
     user.is_staff = True

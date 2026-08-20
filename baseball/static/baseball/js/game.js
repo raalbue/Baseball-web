@@ -283,7 +283,16 @@ function showGameOver(state) {
     link.textContent = 'Back to games';
     div.appendChild(link);
 
-    if (GAME_MODE !== 'multiplayer') {
+    if (SEASON_ID) {
+        const seasonWrap = document.createElement('div');
+        seasonWrap.className = 'mt-2';
+        const seasonLink = document.createElement('a');
+        seasonLink.href = SEASON_URL;
+        seasonLink.className = 'btn btn-outline-primary btn-sm';
+        seasonLink.textContent = 'Continue Season';
+        seasonWrap.appendChild(seasonLink);
+        div.appendChild(seasonWrap);
+    } else if (GAME_MODE !== 'multiplayer') {
         const replayWrap = document.createElement('div');
         replayWrap.className = 'mt-2 d-flex align-items-center gap-2';
 
